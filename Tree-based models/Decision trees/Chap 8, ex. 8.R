@@ -4,7 +4,7 @@ attach(Carseats)
 View(Carseats)
 #Question a####
 set.seed(2)
-train = sample(dim(Carseats)[1], dim(Carseats)[1] * 0.33)
+train = sample(dim(Carseats)[1], dim(Carseats)[1] * 3/4)
 Carseats.train = Carseats[train, ]
 Carseats.test = Carseats[-train, ]
 
@@ -24,15 +24,16 @@ cv.carseats = cv.tree(tree.carseats, FUN=prune.tree)
 par(mfrow=c(1, 2))
 plot(cv.carseats$size, cv.carseats$dev, type="b")
 plot(cv.carseats$k, cv.carseats$dev, type="b")
+
 # Best size = 6
-pruned.carseats = prune.tree(tree.carseats, best=6)
+pruned.carseats = prune.tree(tree.carseats, best=16)
 par(mfrow=c(1, 1))
 plot(pruned.carseats)
 text(pruned.carseats, pretty=0)
 pred.pruned = predict(pruned.carseats, Carseats.test)
 mean((Carseats.test$Sales - pred.pruned)^2)
 #In this case the pruning with CV results in a slight decrease in test MSE.
-#(5.43) The decision tree is a little bit shallower, so we didnt get so much out of it.
+#(4.12) The decision tree is a little bit shallower, so we didnt get so much out of it.
 
 #Question d####
 library(randomForest)
