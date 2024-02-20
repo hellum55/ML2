@@ -1,0 +1,596 @@
+---
+## "Predicting Algae Blooms" 
+(Source: Torgo L. Data Mining with R, 2nd Ed., Chapman & Hall/CRC Press)
+
+&nbsp;
+&nbsp;
+
+
+
+### 1. Background 
+High concentrations of certain harmful algae in rivers constitute a serious ecological problem with a strong impact not only on river lifeforms, but also on water quality. Being able to monitor and perform an early forecast of algae blooms is essential to improving the quality of rivers
+ 
+
+&nbsp;
+&nbsp;
+
+
+
+### 2. Case study (Business Understanding Phase)
+
+With the goal of addressing this prediction problem, several water samples were collected in different European rivers at different times during a period of approximately 1 year. For each water sample, different chemical properties were measured as well as the frequency of occurrence of seven harmful algae. Some other characteristics of the water collection process were also stored, such as the season of the year, the river size, and the river speed. 
+
+One of the main motivations behind this application lies in the fact that chemical monitoring is cheap and easily automated, while the biological analysis of the samples to identify the algae that are present in the water involves microscopic examination, requires trained manpower, and is therefore both expensive and slow.  As such, obtaining models that are able to accurately predict the algae frequencies based on chemical properties would facilitate the creation of cheap and automated systems for monitoring harmful algae blooms. 
+
+[Another possible objective of this study could be to provide a better understanding of the factors  influencing the algae frequencies. In that case, we would want to understand how these frequencies are related to certain chemical attributes of water samples as well as other characteristics of the samples (like season of the year, type of river, etc.).]
+ 
+
+&nbsp;
+&nbsp;
+
+
+
+
+### 3. The data (Data Understanding Phase)
+
+There are two main datasets for this problem. The first consists of data for n=200 observations (water samples). To be more precise, each observation in the available datasets is in effect an aggregation of several water samples collected from the same river over a period of 3 months, during the same season of the year. 
+
+Each observation contains information on 11 variables. 
+
+  + 3 of these variables are nominal (categorical) and describe:
+          - Season of the year when the water samples to be aggregated were collected
+          -	Size of the river in question
+          -	Speed of the river in question
+  
+  + The 8 remaining variables are values (numerical) of different chemical parameters measured in the water samples forming the aggregation, namely: 
+      +	Maximum pH value 
+      +	Minimum value of O2 (oxygen) 
+      +	Mean value of Cl (chloride) 
+      +	Mean value of NO−3 (nitrates) 
+      +	Mean value of NH+4 (ammonium) 
+      +	Mean of PO3− (orthophosphate) 4 
+      +	Mean of total PO4 (phosphate) 
+      +	Mean of chlorophyll 
+
+The second dataset contains information on n=140 extra observations. It uses the same basic structure, but it does not include information concerning the seven harmful algae frequencies. These extra observations can be regarded as a kind of test set. 
+
+The main goal of our study is to predict the frequencies of the seven algae for these 140 water samples. This means that we are facing a predictive data mining task.
+
+
+&nbsp;
+&nbsp;
+
+
+
+### 4. Requirements: 
+
+&nbsp;
+&nbsp;
+
+
+#### 4.1 Task 1: Understand and import data properly
+
+The data is available in the package DMwR2. If we load "dplyr" package before loading the data, we get a data frame table object (a tibble) instead of the standard data frame. A tibble is a modern way to work with our data comparatively with data frames. A tibble has several advantages as we will see later. 
+
+```{r eval=FALSE}
+library(dplyr)
+library(DMwR2)
+data(algae, package="DMwR2")
+class(algae)
+```
+
+```{r eval=FALSE}
+# Alternative:
+#algae <- read.table('Analysis.txt',header=F,dec='.',col.names=c('season','size','speed','mxPH','mnO2','Cl','NO3','NH4','oPO4','PO4','Chla','a1','a2','a3','a4','a5','a6','a7'),na.strings=c('XXXXXXX'))
+# install.packages("tibble")
+# library("tibble")
+# Convert your data to a tibble: tibble::as_tibble(algae)
+
+```
+&nbsp;
+&nbsp;
+&nbsp;
+&nbsp;
+
+#### 4.2 Task 2: Inspect your data and do the required variable adaptations and transformations 
+```{r eval=FALSE}
+# Summary of descriptive statistics to get a first idea of the distribution of the variables
+summary(algae) 
+```
+
+```{r eval=FALSE}
+# Check visually distribution of variables and identify possible errors in the data
+library(DataExplorer) 
+options(repr.plot.width=4, repr.plot.height=4)
+plot_bar(algae)
+plot_histogram(algae)
+```
+
+```{r eval=FALSE}
+# Alternatively, one-by-one
+# mxPH (continous)
+
+library(ggplot2)
+ggplot(algae,aes(x=mxPH)) + geom_histogram(aes(y=..density..)) # aes(y=..density..) displays probabilities (otherwise, displays counts) 
+ggplot(algae,aes(x=mxPH)) + geom_histogram(aes(y=..density..)) + 
+    geom_density(color="red") + geom_rug() + 
+    ggtitle("The Histogram of mxPH (maximum pH)") + 
+    xlab("") + ylab("") 
+
+# geom_rug() option adds the real values near the X-axis.We see that two values are significantly smaller than all others.
+# The variable mxPH distribution seems pretty normal. We may re-check normality using a QQplot. Recall, QQplot plots the variable values against the theoretical quantiles of a normal distribution (solid line) and the 95% CI on the normal distribution (dashed lines)
+
+library(car)
+qqPlot(algae$mxPH,main='Normal QQ plot of maximum pH',ylab="")
+# There are several low values of the variable that clearly break the assumptions of a normal distribution
+```
+
+```{r eval=FALSE}
+# oPO4 (continuous)
+# Instead of a histogram, now we use a boxplot which gives us a similar inspection for continuous variables. 
+# Box plots give us plenty of information regarding not only the central value and spread of the variable, but also eventual outliers.
+ggplot(algae,aes(x=factor(0),y=oPO4)) + 
+    geom_boxplot() + geom_rug() + 
+    geom_hline(aes(yintercept=mean(algae$oPO4, na.rm = TRUE)),
+               linetype=2,colour="red") +
+    ylab("Orthophosphate (oPO4)") + xlab("") + scale_x_discrete(breaks=NULL) 
+
+# mean() allows us to see the mean of the variable (red dashed line). By comparing this line with the black line inside the box indicating the median, we can conclude that the presence of several outliers has distorted the value of the mean as a statistic of centrality. oPO4 has a distribution of the observed values clearly concentrated on low values, thus with a positive skew.
+
+# etc. for the rest of the variables
+
+```
+
+```{r eval=FALSE}
+# When we encounter outliers we may see the observation that has these strange values. 
+# for NH4 using a tibble 
+plot(algae$NH4, xlab = "")
+abline(h = mean(algae$NH4, na.rm = T), lty = 1)
+abline(h = mean(algae$NH4, na.rm = T) + sd(algae$NH4, na.rm = T), lty = 2)
+abline(h = median(algae$NH4, na.rm = T), lty = 3)
+identify(algae$NH4,labels=row.names(algae) )
+# PS: This plot should be interactive when you click left with the mouse on the dots in the plot; In Mac computers does not work for the time being.  
+```
+
+```{r eval=FALSE}
+# Alternative for standard data frames
+plot(algae$NH4, xlab = "")
+clickedRows <- identify(algae$NH4)
+algae[clickedRows, ]
+```
+
+```{r eval=FALSE}
+# Filtering the data based of a cutoff
+library(dplyr)
+filter(algae, NH4 > 19000)
+```
+
+```{r eval=FALSE}
+# Check bivariate distributions and/or measures of association between variables. 
+pairs(algae) 
+# or single graphs  e.g .distribution of a1 by river size
+library(lattice)
+bwplot(size ~ a1, data=algae, ylab='River Size',xlab='Algae A1')
+# Smaller rivers have higher frequencies of alga a1, but we can also observe that the value of the observed frequencies for the small rivers is much more widespread across the domain of frequencies than for other types of rivers
+```
+
+```{r eval=FALSE}
+# In any kind of graph, if we want the levels of a categorical variables to be displayed in a particular order, we can set them previously with fct_relevel(): 
+library(forcats)
+algae <- mutate(algae,
+                size=fct_relevel(size,c("small","medium","large")),
+                speed=fct_relevel(speed,c("low","medium","high")),
+                season=fct_relevel(season,c("spring","summer","autumn","winter")))
+```
+
+
+```{r eval=FALSE}
+# Dealing with missing data. Recall the different strategies:
+# 1. Remove them
+# 2. Fill the unknown values with the most frequent values (mode) - for factors; mean - for numeric
+# 3. Fill in the unknown values by exploring the similarity between cases 
+# 4. Fill in the unknown values by exploring the similarity between variables
+# 5. Use other advanced tools that are able to handle these values
+
+# Next we will implement these strategies. They are not complementary. This means that as you go into another method of dealing with missing values, you should read in again the original data. The easiest form of doing this is to execute the following code: data(algae, package="DMwR2")
+```
+
+```{r eval=FALSE}
+# Count the missing
+library(DataExplorer)
+plot_missing(algae)
+```
+
+```{r eval=FALSE}
+# To remove them all
+algae = na.omit(algae) 
+```
+
+```{r eval=FALSE}
+# To identify and remove only those rows with many missings
+data(algae, package="DMwR2") 
+apply(algae, 1, function(x) sum(is.na(x))) # check the number of missing values in each row 
+manyNAs(algae, 0.2) # display the rows with min 20% of columns with a NAs; in this case, row 62 and 199
+# So now we can take these rows out
+algae <- algae[-manyNAs(algae, 0.2), ] # note in the global env., the new dataset has 198 obs. 
+```
+
+```{r eval=FALSE}
+# To fill the NAs with the most frequent values
+# - mean  - for approx. normal distributed variables
+# - median - for skewed distributions
+data(algae, package="DMwR2") 
+algae[48,]
+algae[48, "mxPH"] <- mean(algae$mxPH, na.rm = T) # to fill exactly mxPH for observation 48
+
+library(car)
+qqPlot(algae$Chla,main='Normal QQ plot of Chla',ylab="") # because it is not normally distributed --> 
+algae[is.na(algae$Chla), "Chla"] <- median(algae$Chla, na.rm = T) # I choose to fill the whole column with the median
+
+# centralImputation() in the library DMwR2 fills in all unknowns in a dataset using a statistic of centrality. This function uses the median for numeric columns and uses the most frequent value (the mode) for nominal variables. 
+data(algae, package="DMwR2") 
+algae <- algae[-manyNAs(algae, 0.2), ]
+algae <- centralImputation(algae)
+```
+
+```{r eval=FALSE}
+# To fill in NAs based on correlation 
+# Visualize the correlations between variables
+str(algae)
+par(mfrow = c(1, 1))
+library(corrplot)
+cormatrix = corrplot(cor(algae [, -c(1:3)], use="complete.obs"), diag=FALSE,  type="upper", cl.pos="n")
+cormatrix
+# In our case the correlations are in most cases irrelevant.except: NO3 and NO4 (0.72); PO4 and oPO4(above 0.9).
+
+cor(algae[,-c(1:3)],algae$PO4, use="complete.obs" )
+
+# The correlation between NH4 and NO3 is less evident (0.72) and thus it is risky to take advantage of it to fill in the unknowns.Assuming that we removed the samples 62 and 199 because they have too many unknowns, there will be no water sample with unknown values on NH4 and NO3. 
+# With respect to PO4 and oPO4, the discovery of this correlation allows us to fill in the unknowns on these variables. 
+# In order to achieve this, we need to find the form of the linear correlation between these variables.
+data(algae)
+algae <- algae[-manyNAs(algae), ]
+lm(PO4 ~ oPO4, data = algae)
+# Now create a function that would return the value of PO4 given the value of oPO4, and then apply this function to all unknown values:
+fillPO4 <- function(oP) ifelse(is.na(oP),NA,42.897 + 1.293 * oP) #Given a value of oPO4, this function returns the value of PO4 according to the discovered linear relation 
+algae[is.na(algae$PO4), "PO4"] <- sapply(algae[is.na(algae$PO4), "oPO4"], fillPO4) # This function is then applied to all samples with unknown value on the variable PO4. This is done using the function sapply(), a meta-function.This function has a vector as the first argument and a function as the second.The result of this call to sapply() will be a vector with the values to fill in the unknowns
+# This type of analysis could be carried out for the other variables with unknown values. 
+``` 
+
+```{r eval=FALSE}
+# To fill in NAs based on exploring similarities between cases
+# Many methods exist. The method we describe below will use a variant of the Euclidian distance to find the k most similar cases (k nearest neighbours) of any water sample with some unknown value in a variable, and then use their values to fill in the unknown. function knnInputation from the package DMwR2 applies to both factors and numerical variables. 
+data(algae)
+algae <- algae[-manyNAs(algae), ]
+algae <- knnImputation(algae, k = 10) 
+# algae <- knnImputation(algae, k = 10, meth = "median") # in case we want to use the median of the k neighbours to fill in the NA
+table(is.na(algae))
+```
+&nbsp;
+&nbsp;
+* NOTE 1: See the other advanced methods discussed in the Bayesian Network course. 
+* NOTE 2: Further readings on data summarization and visualization include: 
+    - R Graphics by Murrell (2006)
+    - Handbook of Data Visualization edited by Chen et al. (2008)
+* NOTE 3:  Further readings on data preparation and handling missing values include: 
+    - Data Preparation for Data Mining by Pyle (1999). 
+    - Predictive Data Mining by Weiss and Indurkhya (1999)
+&nbsp;
+&nbsp;
+&nbsp;
+&nbsp;
+
+
+
+
+
+#### 4.3 Task 3: Build one or several predictive models and evaluate their performance
+The main goal of this case study is to obtain predictions for the frequency values of the seven algae in a set of 140 water samples. Given that these frequencies are quantitative measurements, we are facing a regression task. First we apply a Regression Tree to predict the value of the frequencies of alga a1. The tree-models handle data sets with missing values; therefore we only need to remove samples 62 and 199 for the reasons mentioned before.
+
+To run a regression tree, we use the package "rpart (alternative the package "tree" as in the textbook or the package "caret"). 
+
+&nbsp;
+&nbsp;
+
+
+
+#### 4.3.1. Growing a regression tree
+
+```{r eval=FALSE}
+set.seed(123)
+library(rpart)
+data(algae, package="DMwR2") 
+algae <- algae[-manyNAs(algae), ]
+rt.a1 <- rpart(a1 ~ ., data = algae[, 1:12])
+```
+
+
+```{r eval=FALSE}
+rt.a1
+# Reading from the root, we can observe that we have 198 samples (the size of the training data) at this node, that these 198 samples have an average value for the frequency of algal a1 of 16.99, and that the deviance from this average is 90401.29.
+
+# From the root node we have a branch (tagged by R with “2)”) for the cases where the test “PO4 ≥43.818” is true (147 samples); and also a branch for the 51 remaining cases not satisfying this test (marked by R with “3)”)
+
+# From node 2 we have two other branches leading to nodes 4 and 5, depending on the outcome of a test on Cl.
+
+#.. .and so on until a leaf node is reached. Leaves are marked with asterisks by R. At these leaves we have the predictions of the tree. That is, if we want to use a tree to obtain a prediction for a particular water sample, the average target variable value found at the leaf we have reached is the prediction of the tree.
+
+```
+
+
+```{r eval=FALSE}
+# Graphical representation 
+library(rpart.plot)
+prp(rt.a1,extra=101,box.col="orange",split.box.col="grey")
+# summary(rt.a1)
+# The function rpart() grows the tree until a stopping criteria is met.
+# We can control for the stopping criteria altering the following three parameters: 
+# (1) cp: the decrease in the deviance goes below a certain threshold; cp = 0.01 is the default. 
+# (2) minsplit: the number of samples in the node is less than another threshold; minsplit = 20 is the default.
+# (3) maxdepth: the tree depth exceeds another value;  maxdepth = 30 is the default. 
+```
+&nbsp;
+&nbsp;
+
+
+#### 4.3.2 Pruning the tree
+```{r eval=FALSE}
+# The rpart package implements cost complexity pruning (Breiman et al., 1984)
+# This method uses the values of the parameter cp (deviance) that R calculates for each node of the tree.
+# The pruning method tries to estimate the value of cp that ensures the best compromise between predictive accuracy and tree size. 
+# By default, R selected a model for which the decrease in the deviance went below the default threshold (cp = 0.01); this is model 9 in the following list:
+
+printcp(rt.a1) 
+
+# Model 9 will have a relative error (compared to the root node) of aprox. 0.35. 
+# Based on an internal process of ten-fold cross-validation,the average relative error is about 0.74 ± 0.12 
+# Using the information provided by these more reliable estimates of performance, which avoid the overfitting problem, we can observe that we would theoretically be better off with the tree number 4 which has a lower estimated average relative error (about 0.66, in my case). If we prefer this tree to the one suggested by R, we can obtain it setting the respective cp value.
+
+# An alternative selection rule is to choose the best tree according to the "within one Standard Error"" rule.
+# In this case the one SE tree is the smallest tree with error less than 0.66671 + 0.11366 = 0.78037. In this case is the tree number 2 with an estimated error of 0.73134. If we prefer this tree to the one suggested by R, we can obtain it setting the respective cp value:
+```
+
+
+```{r eval=FALSE}
+rt2.a1 <- prune(rt.a1, cp = 0.071885) # I call the pruned tree "rt2.a1"; 
+prp(rt2.a1) # plot it
+ # Comments: 
+    # In Solutions Ch8, Ex. 8c) using the package ´tree´, prunning was done a bit differently --> 
+    # there we chose the model with the smallest error (MSE) and look at its size (# of terminal leaves, T) or     # cost-complexity parameter (called k in that package)
+    # further we pruned the original tree by setting the corresponding size of the tree (e.g. best = 6). 
+    
+    # Here in package ´rpart ´ we took the "one-SE" approach -->
+    # here we chose the SIMPLEST model whose xerror is within 1SE from the minimum cv error and look at its-->
+    # cost-complexitity parameter(called cp in this package) --> 
+    # further we pruned the original tree by  setting the cp.
+```
+
+
+```{r eval=FALSE}
+# We can automate (grow and prune at one-SE in one single step) if we use the function rpartXse ().
+# This function takes as an argument the se value, defaulting being se=1 (selects the simplest model whose xerror is within one-SE from the minimum cv error).  
+rt2.a1.auto <- rpartXse(a1 ~., data=algae[, 1:12]) 
+prp(rt2.a1.auto) # plot it
+```
+
+
+```{r eval=FALSE}
+# To manually prune a tree indicating the number of the nodes (you can obtain these numbers by printing the tree object) at which you want to prune, we proceed in the following way:
+ first.tree <- rpart(a1 ~ ., data = algae[, 1:12]) # first we grow it
+ first.tree # see the number of the nodes
+prp(first.tree) # plot it
+ my.pruned.tree <- snip.rpart(first.tree, c(4, 7)) # prune it at node 4 and 7
+prp(my.pruned.tree)
+```
+
+&nbsp;
+&nbsp;
+
+
+#### 4.3.3.Model evaluation and selection 
+
+```{r eval=FALSE}
+# Several criteria exit to evaluate a model (prediction performance, complexity, interpretability, computational efficiency). Below we focus on:
+
+# **********************
+# Prediction performance 
+# **********************
+
+# We compare the real values of the target variable with the predictions. Based on this we can calculate some average error like the mean squared error (MSE) and mean absolute error (MAE) or normalized mean squared error (NMSE).
+```
+
+```{r eval=FALSE}
+# MAE, MSE, NMSE using unpruned tree
+
+rt.predictions.a1 <- predict(rt.a1, algae) 
+(mae.a1.rt <- mean(abs(rt.predictions.a1 - algae[["a1"]]))) # MAE
+(mse.a1.rt <- mean((rt.predictions.a1 - algae[["a1"]])^2)) # MSE
+(nmse.a1.rt <- mean((rt.predictions.a1-algae[['a1']])^2) /
+               mean((mean(algae[['a1']])-algae[['a1']])^2)) # NMSE: ratio between the performance of our model and the mean value of the target variable; NMSE range is from 0 to 1. If our model is performing better than simply predicting the average for all cases NMSE should clearly be less than 1. 
+
+```
+
+```{r eval=FALSE}
+# MAE, MSE, NMSE using pruned tree 
+
+rt2.predictions.a1 <- predict(rt2.a1, algae) 
+(mae.a1.rt <- mean(abs(rt2.predictions.a1 - algae[["a1"]]))) 
+(mse.a1.rt <- mean((rt2.predictions.a1 - algae[["a1"]])^2)) 
+(nmse.a1.rt <- mean((rt2.predictions.a1-algae[['a1']])^2) /
+               mean((mean(algae[['a1']])-algae[['a1']])^2)) 
+
+
+# Prunned tree yields higher training error (bias) than unpruned tree. This is normal as unpruned tree might overfit the data; we need to check how our trees perform on unseen data to actually evaluate their performance. To do so, we may implement a k-fold cross-validation particularly when we want to obtain these reliable estimates for small data sets (like our case study where n=198). 
+
+```
+
+
+```{r eval=FALSE}
+# We try 3 variants of a regression tree :
+# we use different levels of prunning by setting se = 0 (tree with minimum xerror), se = 0.5 (tree within 0.5se from the minimum xerror), se = 1 (tree within 1se from the minimum xerror) 
+# we use the library performanceEstimation designed specifically for these model comparison
+# internally this function uses 5 repetitions of the 10-fold cross validation process 
+# and we can set MSE or NMSE as a loss function 
+
+library(performanceEstimation) # Check this very nice library for more details
+
+res <- performanceEstimation(
+    PredTask(a1 ~ ., algae[, 1:12], "a1"), c(workflowVariants(learner="rpartXse",learner.pars=list(se=c(0,0.5,1)))), 
+    EstimationTask(metrics="nmse",method=CV(nReps=5,nFolds=10)))
+
+```
+
+
+```{r eval=FALSE}
+summary(res) 
+# Based on the cv, the best average NMSE is obtained in the first regression tree (se=0). 
+```
+
+```{r eval=FALSE}
+plot(res) 
+# Althouth the average of NMSE is ok, the three models are generating several bad results: some NMSE score clearly above 1, which is the baseline of being as competitive as predicting always the average value for all test cases. 
+```
+
+
+```{r eval=FALSE}
+# Before we only considered predicting frequency of algae a1 (our first DV). We can see the results for all seven prediction tasks at the same time, using the following code: 
+
+DSs <- sapply(names(algae)[12:18],
+          function(x,names.attrs) { 
+            f <- as.formula(paste(x, "~ ."))
+            PredTask(f, algae[,c(names.attrs,x)], x, copy=TRUE) 
+          },
+          names(algae)[1:11])
+
+
+res.all <- performanceEstimation(
+    DSs,
+    c(workflowVariants(learner="rpartXse", learner.pars=list(se=c(0,0.5,1)))),
+    EstimationTask(metrics="nmse" ,method=CV(nReps=5, nFolds=10)))
+
+
+plot(res.all)
+
+# Some NMSE score clearly above 1, which is the baseline of being as competitive as predicting always the average value for all test cases. The variability of the results provide indication that this might be a good candidate for an ensemble approach
+
+topPerformers(res.all)  #allows us to see the best model (among the three regression trees tested) for each of the seven prediction tasks (corresponding to predicting a1-a7)
+
+```
+
+&nbsp;
+&nbsp;
+
+
+#### 4.3.4. Ensemble methods: Random Forests
+```{r eval=FALSE}
+
+# We implement 3X3=9 random forests models for different number of trees: ntree=20, 50, 100; and different number of mtry = 4,5,6 (see ISL textbook for details on these parameters). In addition, I keep also the basic trees models to compare. In total 12 models are evaluated. It takes time!!! be patient... as seen below, we apply 5 repetitions of the 10-fold cross validation process. I set NMSE as a loss function as before 
+
+
+# pre="knnInp" is used to fill in NAs (if any) with the values of the nearest neighbors.
+
+
+
+set.seed(123)
+library(randomForest)
+res.all <- performanceEstimation(
+    DSs,
+    c(workflowVariants(learner="rpartXse",
+                       learner.pars=list(se=c(0,0.5,1))),
+      workflowVariants(learner="randomForest", pre="knnImp",
+                       learner.pars=list(mtry=c(4,5,6), ntree=c(20,50,100)))),  # change to smaller number to facilitate faster convergence in class
+    EstimationTask(metrics="nmse",method=CV(nReps=1,nFolds=10)))
+```
+
+```{r eval=FALSE}
+rankWorkflows (res.all, top=3) 
+
+# We can see the top performers: for most of the problems, some variant of random forest is the best.
+# Still, the results are not always very good, in particular for alga 7
+
+```
+
+
+&nbsp;
+&nbsp;
+
+
+#### 4.3.5. Predicting in the test sample
+```{r eval=FALSE}
+
+# Previously we described how to proceed to choose the best models. The used procedure consisted of obtaining unbiased estimates of the NMSE for a set of models on all seven predictive tasks, by means of a cross-validation experimental process. Now we want to obtain the predictions for the seven algae on the 140 test samples.
+```
+
+```{r eval=FALSE}
+# Get the best workflow for each of the seven algae into wts object
+
+wfs <- sapply(taskNames(res.all),
+              function(t) topPerformer(res.all,metric="nmse",task=t))
+```
+
+```{r eval=FALSE}
+# e.g. 
+wfs[["a1"]]
+wfs[["a7"]]
+```
+
+
+```{r eval=FALSE}
+# Create a matrix with the predictions
+  
+# first we merge the two test datasets containing IVs and DVs into one dataframe
+  
+full.test.algae <- cbind(test.algae, algae.sols)
+ 
+# next, we create an array (pts) with 3 dimensions that will store all the information; this is like having 2 matrices of 140 test cases and 7 columns (algae) each; the first of these matrices contains the true values of the algae and the second contains the predictions from the workflows. This array is filled in successively by applying the best workflows for each of the 7 algae using function runWorkflow(). For this we have to build an adequate formula for each predictive task using the correct columns of the original data to obtain the model - e.g .below 11 columns are the IVs in the original data
+
+  pts <- array(dim = c(140,7,2),
+             dimnames = list(1:140, paste0("a",1:7), c("trues","preds")))
+for(i in 1:7) {
+    res <- runWorkflow(wfs[[i]],
+                       as.formula(paste(names(wfs)[i],"~.")),
+                       algae[,c(1:11,11+i)],
+                       full.test.algae[,c(1:11,11+i)])
+    pts[,i,"trues"] <- res$trues
+    pts[,i,"preds"] <- res$preds
+}
+  
+```
+
+
+
+```{r eval=FALSE}
+# Using the information stored in pts we can now calculate the NMSE scores of our models.
+
+# We first obtain the predictions of the baseline model used to calculate the NMSE, which in our case consists of predicting the average value of the target variable: 
+
+avg.preds <- apply(algae[,12:18], 2, mean)
+
+# Then we proceed to calculate the NMSEs for the seven models/algae.
+
+apply((pts[,,"trues"] - pts[,,"preds"])^2, 2 ,sum) /
+    apply( (scale(pts[,,"trues"], avg.preds, FALSE))^2, 2, sum)
+
+# The results that we obtained are in accordance with the cross-validation estimates obtained previously. They confirm the difficulty in obtaining good scores for algae 3, 4 and 7, while for the other problems the results are more competitive, in particular for alga 1.# With a proper model parameters selection phase and more data, we were able to obtain interesting scores for these prediction problems.
+
+
+# scale() function 
+#   * it is in general used to normalize a data set (extract the averages from the raw values and divide by SD). 
+#   * it works by substracting the second argument from the first and than dividing the result by the third, unless this argument is FALSE, as in the case above
+
+# apply() function
+#   * Returns a vector or array or list of values obtained by applying a function to margins of an array or matrix.
+#   * in the 1st case above, the function is mean, and 2 indicates it will be applied to columns (for a matrix 1 indicates rows, 2 indicates columns)
+#   * in the 2nd case above,the function is sum.
+# FINAL NOTE: In general, tree based models are significantly stronger for classification tasks (vs. regression tasks). 
+
+```
+
+&nbsp;
+&nbsp;
+
+### End
+
+
+
+
