@@ -28,9 +28,6 @@ library(rpart)       # for fitting decision trees
 library(ipred)       # for fitting bagged decision trees
 library(randomForest)# for fitting bagged decision trees
 
-
-
-
 set.seed(123)
 
 ames <- AmesHousing::make_ames()
@@ -39,8 +36,6 @@ split <- initial_split(ames, prop = 0.7,
                        strata = "Sale_Price")
 ames_train  <- training(split)
 ames_test   <- testing(split)
-
-
 
 # train bagged model (here with ipred library::bagging)
 ames_bag1 <- bagging(
@@ -54,7 +49,7 @@ ames_bag1 <- bagging(
 ames_bag1
 # OOB RMSE = 28029.47 
 
-ames_bag1 <- bagging(
+ames_bag2 <- bagging(
   formula = Sale_Price ~ .,
   data = ames_train,
   nbagg = 150,  # trial with 150 bags
@@ -62,12 +57,10 @@ ames_bag1 <- bagging(
   control = rpart.control(minsplit = 2, cp = 0)
 )
 
-ames_bag1
+ames_bag2
 # OOB RMSE = 27977.04
 
-
-
-ames_bag1 <- bagging(
+ames_bag3 <- bagging(
   formula = Sale_Price ~ .,
   data = ames_train,
   nbagg = 300,  # trial with 300 bags
@@ -75,7 +68,7 @@ ames_bag1 <- bagging(
   control = rpart.control(minsplit = 2, cp = 0)
 )
 
-ames_bag1
+ames_bag3
 # OOB RMSE = 27664.28 
 
 # Concl.: for this ames data,
@@ -88,7 +81,7 @@ ames_bag1
 
 # train bagged model (here with caret library) 
 # NOTE: run this at home; it takes 30 min to converge!
-ames_bag2 <- train(
+ames_bag4 <- train(
   Sale_Price ~ .,
   data = ames_train,
   method = "treebag",
@@ -96,7 +89,7 @@ ames_bag2 <- train(
   nbagg = 200,  
   control = rpart.control(minsplit = 2, cp = 0)
 )
-ames_bag2
+ames_bag4
 
 #importance
 vip::vip(ames_bag2, num_features = 40, bar = FALSE)
