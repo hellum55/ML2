@@ -1,0 +1,548 @@
+---
+title: "Cases Support Vector Machines"
+author: "Ana Alina Tudoran"
+date: "2/03/2023"
+output:
+  html_document: default
+  pdf_document: default
+  word_document: default
+---
+
+# I. CASE STUDY: Predicting Student Admission
+
+&nbsp;
+&nbsp;
+
+#### 1. Background 
+Admission to the university is an important topic. Effective university admission prediction is needed to help students choose the right university college and assure their tertiary education's performance. How a student chooses a university, and conversely how a university chooses a student, determines both sides' success in carrying through the education. However, due to the vast number of students required to attend the university every year, this decision-making process became a complex problem. Universities admissions are faced annually with a tremendous quantity of student applicants—the size of the applicant pool taxes the admissions staff's resources. Therefore, university admission prediction methods are used for categorizing student applicants (Ragab et al., 2012, 12th International Conference of Intelligent Systems Design and Applications).
+
+&nbsp;
+&nbsp;
+
+#### 2. Case study (Business Understanding Phase)
+Suppose you are the university department administrator, and you want to determine each applicant's chance of admission based on their results on two exams. To address this prediction problem, you collect historical data from previous applicants you can use as a training set for the support vector machine model. For each training example, you have the applicant's scores on two exams and the admissions decision. Your task is to build a classification model that estimates an applicant's probability of admission based on those two exams' scores. 
+ 
+&nbsp;
+&nbsp;
+
+#### 3. The data (Data Understanding Phase)
+There is one dataset for this problem. The dataset (Admission.csv) consists of data for n = 100 observations (students). Each observation contains information on three variables:
+  + The two independent variables (V1 and V2) are numerical values of two different undergraduate grades
+  + The dependent variable (V3) is an integer, representing the admission decision (0=rejected; 1=accepted)
+Our study's primary goal is to correctly predict whether students will be admitted or not at the university. This means that we are facing a predictive data mining task.
+
+&nbsp;
+&nbsp;
+
+
+#### 4. Requirements: 
+&nbsp;
+&nbsp;
+
+
+##### 4.1 Task 1: Understand and import data properly
+```{r eval=FALSE}
+Admission <- read.csv("~/Cloud/Documents/Alina Tudoran/TEACHING/Postgraduate/Machine Learning 2020-2021/ML2/Ch9_SVM/Case Studies/Admission.csv")
+```
+&nbsp;
+&nbsp;
+&nbsp;
+&nbsp;
+
+##### 4.2 Task 2: Inspect your data and do the required variable adaptations and transformations 
+```{r eval=FALSE}
+#  * Support Vector models have no distributional assumptions
+#  * Outliers do not (generally) influence the SVM models
+#  * Data exploration is done 
+#      - to identify possible errors in the data 
+#      - to adapt the variables type
+#      - to evaluate and treat the missing values
+#      - to better understand the data
+```
+
+```{r eval=FALSE}
+# renaming the variables (optional)
+# library(tidyverse)
+# Admission <- Admission %>% 
+#              rename(Grade1 = V1, Grade2 = V2, DV = V3)
+```
+
+```{r eval=FALSE}
+str(Admission)
+summary(Admission) 
+```
+
+```{r eval=FALSE}
+# create new features (optional)
+# library(dplyr)
+# dataTf <- dataTf %>% mutate (X/Y)
+```
+
+```{r eval=FALSE}
+library(DataExplorer) 
+options(repr.plot.width=4, repr.plot.height=4)
+plot_histogram(Admission)
+# plot_bar(data)
+```
+
+```{r eval=FALSE}
+# encode the reponse as a factor variable
+Admission$V3=as.factor(Admission$V3)
+plot_bar(Admission)
+table(Admission$V3) # 0/1
+levels(Admission$V3) <- c("No", "Yes") # Updated from "Yes"/"No" to "No"/"Yes"
+table(Admission$V3) # No/Yes
+# concl: this data is not too unbalanced 
+# if the distribution of classes (0/1) is extremely unbalanced, there are statistical methods 
+# that can be used to improve the data and directly the algorithm performance (see Supplementary below)
+
+## Supplementary information on handling unbalanced datasets ## 
+    # it applies to all classifiers 
+    # there are some alternatives to handle the unbalanced datasets
+    # they are available in the library ROSE 
+    # There are two main functions: ROSE and ovun.sample. 
+        # ROSE is based on bootstrapping
+        # Ovun.sample is the one I am referring to in particular. The parameter “method”  allows to do:
+        
+        # 1) OVER-SAMPLING the minority class: generating synthetic data that tries to randomly 
+        #     generate a sample of the attributes from observations in the minority class.
+        # 2) UNDER-SAMPLING the majority class: randomly delete some of the observations from 
+        #     the majority class in order to match the numbers with the minority class
+        # 3) BOTH: a combination of over- and under- sampling (method=”both”)
+        # References about this topic:
+        # https://cran.r-project.org/web/packages/ROSE/ROSE.pdf
+        # Lunardon, N., Menardi, G., and Torelli, N. (2014). ROSE: a Package for Binary Imbalanced Learning. R Journal, 6:82--92.
+        # Menardi, G. and Torelli, N. (2014). Training and assessing classification rules with imbalanced data. Data Mining and Knowledge Discovery, 28:92--122.
+```
+
+```{r eval=FALSE}
+# evaluate the missing data
+library(DataExplorer)
+plot_missing(Admission)
+# no missing values in this dataset
+# for many other exploratory techniques, including dealing with missing values,
+# consider the previous case studies discussed.
+```
+&nbsp;
+&nbsp;
+
+
+##### 4.3 Task 3: Build one or several predictive models and evaluate their performance 
+The main goal of this case study is to obtain accurate predictions for a student being admitted or rejected at the university. Given that the DV is categorical, we are facing a classification task. In a data mining project, we would try to compare several classifiers. For the purpose of this exercise, we focus on support vector methods. 
+
+&nbsp;
+&nbsp;
+
+```{r eval=FALSE}
+library(ggplot2)
+qplot(
+  x = V1,
+  y = V2,
+  data = Admission,
+  color = V3 # color by factor 
+)
+#  * The output shows that a linear classifier might be sufficient
+#  * This plot is handy when working with only two predictors
+#  * Next we run a Support Vector Classifier with kernel=linear
+```
+
+&nbsp;
+&nbsp;
+
+```{r eval=FALSE}
+# Splitting into train (for tuning parameters) and test (for performance evaluation)
+set.seed(1)
+train <- sample(nrow(Admission), 80)
+Admission.train <- Admission[train, ]
+Admission.test <- Admission[-train, ]
+```
+
+```{r eval=FALSE}
+#  * To run a SV machines you need to establish the parameter "cost"
+#  * use tune() to search for the best cost among a range of possible values
+library (e1071)
+set.seed(1)
+tune.linear <- tune(svm, V3 ~ ., data = Admission.train, kernel = "linear", ranges = list(cost = 10^seq(-2, 1, by = 0.25)))
+summary(tune.linear)
+```
+
+```{r eval=FALSE}
+#  train the model with the tuned cost
+svm.linear <- svm(V3 ~ ., kernel = "linear", data = Admission.train, cost = tune.linear$best.parameter$cost)
+```
+
+```{r eval=FALSE}
+# ask for plot 
+plot(svm.linear, Admission.train) 
+# observations marked with x are the support vectors
+# the observations that are not support vectors are indicated as circles
+```
+
+```{r eval=FALSE}
+# ask for support vectors 
+svm.linear$index 
+```
+
+```{r eval=FALSE}
+# get summary info 
+summary(svm.linear)
+```
+&nbsp;
+&nbsp;
+
+
+##### Model evaluation 
+```{r eval=FALSE}
+#  * several criteria to evaluate the tuned model
+#  * e.g.error rate, recall, precision, AUC.
+#  * these criteria should be evaluated on the testing data set 
+```
+
+```{r eval=FALSE}
+ # ROC and AUC
+  library(caTools) 
+ # re-train the same model with probability = TRUE
+  svm.linear <- svm(V3 ~ ., kernel = "linear", data = Admission.train, cost = tune.linear$best.parameter$cost, probability=TRUE)
+  test.pred = predict(svm.linear, Admission.test, probability = TRUE)
+  
+  colAUC(attributes(test.pred)$probabilities[,2], Admission.test$V3, plotROC = TRUE) # extract the corresponding probabilities from the list 
+ # The AUC is close to 1, revealing that our model is very good in predicting whether a particular student will be admitted or not. 
+```
+
+```{r eval=FALSE}
+# confusion matrix, recall, specificity in test data
+library(caret)
+confusionMatrix(factor(ifelse(attributes(test.pred)$probabilities[,2] > 0.5,# updated line
+                              "Yes", "No")),
+                factor(Admission.test$V3), positive = "Yes") 
+```
+
+
+&nbsp;
+&nbsp;
+
+##### 4.4 Task 4: Reflect on implications and recommendations.
+a.) The main goal of our study was to correctly predict whether students will be admitted or not at the university. This can help the universities to select the best students and at the same time reduce the effort and time involved into evaluating the students applications.  Our model (SVM linear) managed to predict well with an overall error rate of ... when the cutoff was .... SVM linear model with a cost of 0.1 was related with a high ROC curve and an AUC = 0.85. Sensitivity or recall (1-Type error II) was ... meaning that the model is able to predict ... the Yes´s. 
+
+
+b.) Discuss the seriousness of different type of errors. Which of the two types of error is less serious in this context? 
+
+Current university policy may favour more sensitive models (high true positive rate, that is, high (1-Type error II), minimizing Type error II (fn = true Yes predicted as being No)); or, more specific models (low false positive rate, that is minimizing Type I error (fp = true No predicted as being Yes)).
+Perhaps in this context, minimizing the false positives (fp) would be more important because one would like to avoid that "unprepared" students get admitted to a particular program. The cost of false positives might be much higher than the price of false negatives. Accepting students who are not prepared to follow that program (i.e., fp) may increase students' abandoning the program later, failing at the exams, or pursuing a second career later). Comparatively, the cost of false negatives could be lower. The program will miss the opportunity to accept some of the "prepared" students in the program. Still, as long as this number is not too high, the society can assume this cost. 
+
+The model is acceptable, but one can impose a higher cost for fp, if desired (see a similar discussion in "Ch 9 Solutions Ex 8_update.R") and get the required cutoff 
+
+```{r eval=FALSE}
+# get the cutoff probability corresponding to the minimum total cost, 
+#  given that cost.fp = 2*cost.fn 
+  library(ROCR)
+  pred = prediction(attributes(test.pred)$probabilities[,2], Admission.test$V3, label.ordering = NULL)
+  cost.perf = performance(pred, "cost", cost.fp = 2, cost.fn = 1) 
+  pred@cutoffs[[1]][which.min(cost.perf@y.values[[1]])]
+
+  # now check 
+  library(caret)
+  confusionMatrix(factor(ifelse(attributes(test.pred)$probabilities[,2] > 0.278737,  # updated
+                                "Yes", "No")),
+                factor(Admission.test$V3), positive = "Yes") 
+```
+
+&nbsp;
+&nbsp;
+&nbsp;
+&nbsp;
+&nbsp;
+&nbsp;
+
+
+
+
+# II. CASE STUDY: Predicting Product Quality
+
+&nbsp;
+&nbsp;
+
+#### 1. Background 
+Quality assurance (QA) is a way of preventing mistakes and defects in manufactured products and avoiding problems when delivering products or services to customers. QA serves as the foundation for customer satisfaction and continuous improvement in all aspects of operation. During Quality Assurance (QA), each microchip goes through various tests to ensure it is functioning correctly. 
+
+&nbsp;
+&nbsp;
+
+#### 2. Case study (Business Understanding Phase)
+Suppose you are the product manager of the factory and you have the test results for some microchips on two different tests. From these two tests, you would like to determine whether the microchips should be accepted or rejected. To help you make the decision, you have a dataset of test results on past microchips, from which you can build a classifier. Again, in a full DM project, you would compare several classifiers. For the purpose of this lecture, let us focus on Support Vector models.
+ 
+&nbsp;
+&nbsp;
+
+
+#### 3. The data (Data Understanding Phase)
+There is one dataset for this problem. 
+1.	The dataset (Microchips.csv) consists of data for n = 118 observations (microchips). Each observation contains information on 3 variables:
+ + The two independent variables (V1 and V2) are numerical values of two different tests of microchips
+ + The dependent variable (V3) is integer, representing the tester decision (0=reject; 1=accept)
+In this case study, you will implement a support vector classifier to predict whether microchips from a fabrication plant passes quality assurance (QA).
+
+&nbsp;
+&nbsp;
+
+
+#### 4. Requirements: 
+
+&nbsp;
+&nbsp;
+
+
+##### 4.1 Task 1: Understand and import data properly
+```{r eval=FALSE}
+Microchips <- read.csv("~/Cloud/Documents/Alina Tudoran/TEACHING/Postgraduate/Machine Learning 2020-2021/ML2/Ch9_SVM/Case Studies/Microchips.csv")
+```
+&nbsp;
+&nbsp;
+
+
+##### 4.2 Task 2: Inspect your data and do the required variable adaptations and transformations 
+```{r eval=FALSE}
+str(Microchips)
+View(Microchips)
+summary(Microchips)
+```
+
+```{r eval=FALSE}
+library(DataExplorer) 
+options(repr.plot.width=4, repr.plot.height=4)
+plot_histogram(Microchips)
+```
+
+```{r eval=FALSE}
+# encode the response as a factor variable
+Microchips$V3=as.factor(Microchips$V3)
+levels(Microchips$V3) # 0/1
+levels(Microchips$V3) <- c("No", "Yes")
+# plot it
+plot_bar(Microchips)
+```
+
+```{r eval=FALSE}
+# count the missing
+library(DataExplorer)
+plot_missing(Microchips)
+# no missing values in this dataset
+```
+
+&nbsp;
+&nbsp;
+
+
+##### 4.3 Task 3: Build one or several predictive models and evaluate their performance. 
+
+&nbsp;
+&nbsp;
+```{r eval=FALSE}
+attach(Microchips)
+plot(V1, V2, col=V3)
+#  * it suggests a nonlinear classifier
+#  * next, we run a Support Vector Machines with kernel nonlinear; as an exercise, you may later try a polynomial kernel.
+```
+
+&nbsp;
+&nbsp;
+
+```{r eval=FALSE}
+# Splitting into train and test
+set.seed(1)
+train <- sample(nrow(Microchips), 95)
+Microchips.train <- Microchips[train, ]
+Microchips.test <- Microchips[-train, ]
+```
+
+
+```{r eval=FALSE}
+#  * Support vector machine - with radial kernel
+#  * use tune() to search for the best parameetr ´cost´ and best parameter ´gamma´
+#  * we search among a range of values
+set.seed(1)
+tune.nonlinear <- tune(svm, V3 ~ ., data = Microchips.train, kernel = "radial", ranges = list(cost = 10^seq(-2, 1, by = 0.25), gamma=c(0.5,1,2,3,4)))
+summary(tune.nonlinear)
+
+```
+
+
+```{r eval=FALSE}
+#  now train the model with the tuned parameters
+svm.nonlinear <- svm(V3 ~ ., kernel = "radial", data = Microchips.train, cost = tune.nonlinear$best.parameter$cost, gamma=tune.nonlinear$best.parameter$gamma)
+```
+
+
+```{r eval=FALSE}
+# ask for plot (optional)
+plot(svm.nonlinear, Microchips.train) 
+# notice the observations that are not support vectors - indicated as circles - are far from the decision boundary -> 
+# this indicates that the model might perform well on a testing data
+```
+
+
+```{r eval=FALSE}
+# ask for support vectors (optional) 
+svm.nonlinear$index 
+```
+
+
+```{r eval=FALSE}
+# get summary info (optional)
+summary(svm.nonlinear)
+```
+
+&nbsp;
+&nbsp;
+
+##### Model evaluation
+```{r eval=FALSE}
+# estimated test error rate 
+test.pred <- predict(svm.nonlinear, Microchips.test)
+table(Microchips.test$V3, test.pred)
+# there are 7 missclasified observations in the testing set.
+7/23 # test error rate 0.30
+```
+
+
+```{r eval=FALSE}
+ # * ROC and AUC - we need to set probability=TRUE when training the model and predicting
+library(caTools) 
+svm.nonlinear <- svm(V3 ~ ., kernel = "radial", data = Microchips.train, cost = tune.nonlinear$best.parameter$cost, gamma=tune.nonlinear$best.parameter$gamma, probability=TRUE) 
+yhat.opt.nonlin=predict(svm.nonlinear,Microchips.test,probability = TRUE)
+colAUC(attributes(yhat.opt.nonlin)$probabilities[,2], Microchips.test$V3, plotROC = TRUE) 
+# The output shows AUC is ~ 0.8409.
+```
+
+
+```{r eval=FALSE}
+#  * Support vector machines with polynomial kernel ------------
+#  * use tune() to search for the best parameetr ´cost´ and best parameter ´degree´
+set.seed(1)
+tune.nonlinear.pol <- tune(svm, V3 ~ ., data = Microchips.train, kernel = "polynomial", ranges = list(cost = 10^seq(-2, 1, by = 0.25), degree=c(1,2,3,4,5,6,7,8,9)))
+summary(tune.nonlinear.pol)
+# best cost is ... and best d is ...
+```
+
+```{r eval=FALSE}
+svm.nonlinear.pol <- svm(V3 ~ ., kernel = "polynomial", data = Microchips.train, cost = tune.nonlinear.pol$best.parameter$cost, degree=tune.nonlinear.pol$best.parameter$degree)
+```
+
+
+```{r eval=FALSE}
+# ask for plot (optional)
+plot(svm.nonlinear.pol, Microchips.train) 
+```
+
+
+```{r eval=FALSE}
+# ask for support vectors (optional) 
+svm.nonlinear.pol$index 
+```
+
+
+```{r eval=FALSE}
+# get summary info (optional)
+summary(svm.nonlinear.pol)
+```
+
+&nbsp;
+&nbsp;
+
+##### Model evaluation
+
+```{r eval=FALSE}
+ # * ROC and AUC 
+library(caTools) 
+svm.nonlinear.pol <- svm(V3 ~ ., kernel = "polynomial", data = Microchips.train, cost = tune.nonlinear.pol$best.parameter$cost, gamma=tune.nonlinear.pol$best.parameter$degree, probability=TRUE) 
+yhat.opt.nonlin.pol=predict(svm.nonlinear.pol,Microchips.test,probability=TRUE)
+colAUC(attributes(yhat.opt.nonlin.pol)$probabilities[,2], Microchips.test$V3, plotROC = TRUE) 
+# The output shows AUC is ~ 0.6363636. 
+# Concl: overall, based on the AUC, the polynomial SVM performs worse than the radial SVM.
+```
+
+```{r eval=FALSE}
+# Confusion matrix -- --- initially left as an exercise 
+# now updated as solution is a bit more complex than expected
+
+# a. Confusion matrix at standard cutoff 0.5
+confusionMatrix(factor(ifelse(attributes(yhat.opt.nonlin.pol)$probabilities[,2] > 0.5,
+                              "Yes", "No")),
+                factor(Microchips.test$V3), positive = "Yes") 
+
+# b. Confusion matrix at the cutoff probability corresponding to the minimum 
+# total cost, given that cost.fp = 2*cost.fn 
+
+  pred = prediction(attributes(yhat.opt.nonlin.pol)$probabilities[,2], 
+                    Microchips.test$V3, label.ordering = NULL)
+  pred@predictions # predicted probabilities
+  pred@fn  # list the number of false negatives at different thresholds (cutoffs) 
+  pred@fp #  list the number of false positives at different thresholds (cutoffs) 
+  pred@cutoffs # thresholds used to decide whether a probability prediction is 
+  # classified as positive or negative
+  
+  cost.perf = performance(pred, "cost", cost.fp = 2, cost.fn = 1) 
+  cost.perf@x.values
+  cost.perf@y.values
+  pred@cutoffs[[1]][which.min(cost.perf@y.values[[1]])]
+  # > Inf
+  # The presence of Inf may suggest that there is a 
+  # threshold being considered where the probability required to predict a 
+  # positive outcome is Inf. Checking the pred@predictions, there is no Inf 
+  # value among them, which suggests that the appearance of Inf as a cutoff in 
+  # our pred@cutoffs output is not directly related to the original probabilities
+  # provided by our model but an internal problem in the function. 
+  # Our probabilities are all finite and within a reasonable range.
+  
+  
+ # Solution - exclude Inf
+  
+  # Identify indices of finite cutoffs
+finite_indices <- which(is.finite(pred@cutoffs[[1]]))
+
+# Filter the cost performance values for these finite indices
+# we ensure that cost.perf@y.values and pred@cutoffs are aligned by using the same filtering
+finite_costs <- cost.perf@y.values[[1]][finite_indices]
+
+# Find the index of the minimum cost within these finite costs
+min_cost_index <- which.min(finite_costs)
+
+# Retrieve the corresponding finite cutoff
+optimal_cutoff <- pred@cutoffs[[1]][finite_indices[min_cost_index]]
+optimal_cutoff 
+  
+# get confusion matrix for the optimal cutoff
+confusionMatrix(factor(ifelse(attributes(yhat.opt.nonlin.pol)$probabilities[,2] 
+                              > optimal_cutoff,  "Yes", "No")),
+                factor(Microchips.test$V3), positive = "Yes") 
+
+```
+
+&nbsp;
+&nbsp;
+
+
+##### 4.4 Task 4: Reflect on implications and recommendations 
+a.) Consider the business problem and link it to the objective of this task.
+The manufactured microchips may present defects that can hinder customer beliefs in the product's quality and satisfaction. Furthermore, high inspection volumes require additional personnel, and they can turn inspection processes into manufacturing bottlenecks. This application investigates a possible solution of predictive model-based quality inspection in industrial manufacturing by utilizing Machine Learning techniques. By employing the proposed method, physical inspection volumes can be reduced significantly without sacrificing inspection reliability, default microchips can be identified, and thus, economic advantages can be generated. We implemented a support vector machine model. We trained the model with k-fold cross-validation and optimized hyperparameters. Next, we tested the model on the remaining observations to evaluate its performance.  
+
+b.) Describe clearly how the final model was used to address the business problem and discuss its strengths, weaknesses, and limitations of the modeling process. The results show that inspection volumes of microchips can be reduced significantly by employing the proposed method. The prediction model based on the SVM algorithm allows predicting the final product quality based on two recorded process parameters. The solution can be integrated into the manufacturing plant's architecture and connected to other databases to automize the process of detecting default microchips. Inspection time and additional handling time can be saved, generating an attractive business case.
+
+Strengths of the model: prediction power, speed/prediction time
+Weaknesses (incl. also limitations): 
+- only two predictors are used; the addition of further process parameters may also increase the model performance; but high dimensionality and large data volumes may generate constraints for execution time, energy and memory, or processing capabilities; 
+- to allow a comprehensive predictive model-based inspection, other learning methods can be tested in order to perform the classification task underlying this case, including k-Nearest Neighbors (kNN), Naïve Bayes classifiers (NB), Decision Trees (DT) incl. Ensembles of trees (RF), Logistic Regression (LR), and, later on, Artificial Neural Networks (ANN).   
+
+
+c.)  Discuss if the predictive accuracy and other criteria of the final model are satisfactory. 
+Model evaluation is based on the calculation of various statistical quality measures [... refer based on your output]. One may also refer to convergence (in industry, some algorithms are preferred just because they are faster).
+
+
+d.) Discuss seriousness of different types of prediction errors linked to the context of the business problem.
+Perhaps in this context, one should look for more sensitive models (high true positive rate, that is, high (1-Type error II), minimizing Type error II (fn = true 1 predicted as being 0)).  Being more relaxed concerning false positive rate, Type I error (fp = true 0 predicted as being 1)), implies that the quality assurance analysts will have to test some of the items classified as false positives when in reality they are okay. This activity may increase the cost of operation. Still, this cost may be compensated by reducing the costs involved by delivering a default product and product returns.  
+
+
+&nbsp;
+&nbsp;
+
+### End
