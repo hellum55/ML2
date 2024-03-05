@@ -44,7 +44,7 @@ library(PRROC)
 
 
 #Data
-dataset <- read.csv("~/Cloud/Documents/Alina Tudoran/TEACHING/Postgraduate/Machine Learning 2020-2021/ML2/Ch9_SVM/Tous Case study/DatasetTous.csv")
+dataset <- read.csv("~/Cand. Merc./ML2/Support Vector Machines/DatasetTous.csv")
 str(dataset)
 dataset$best_seller <- as.factor(dataset$best_seller)
 
