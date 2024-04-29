@@ -17,6 +17,7 @@ data_employee$ratingRecommendToFriend <- factor(data_employee$ratingRecommendToF
 data_employee$employmentStatus <- factor(data_employee$employmentStatus)
 str(data_employee)
 
+data_employee$isCurrentJob <- ifelse(is.na(data_employee$isCurrentJob), 0, data_employee$isCurrentJob)
 #The job title and location might not be needed, but lets keep them and see if they still make sense.
 
 #The overall task to do is to predict the overall rating of the company using the variables that are necessary. It is a large data set so it
@@ -40,7 +41,7 @@ plot_missing(data_employee)
 summary(data_employee)
 #When looking at the data we can see that IsCurrentJob only has the observation of 1. We might delete this one. 
 data_employee <- data_employee %>%
-  select(-c(jobEndingYear, ratingCeo, ratingBusinessOutlook, isCurrentJob, jobTitle.text, location.name))
+  select(-c(jobEndingYear, jobTitle.text, location.name))
 
 #Lets look at the target varible and its distribution
 par(mfrow=c(1,4))
