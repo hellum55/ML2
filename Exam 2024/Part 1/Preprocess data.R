@@ -1,49 +1,79 @@
 #Read in the data and treat the strings as factors. We have to do this manually :(
 library(readxl)
+library(dplyr)
+library(visdat)
+library(DataExplorer)
+library(ggplot2)
+
 # Read the Excel file with specified column types
 data_employee <- read_xls('Data.xls', 
                           na = c("", " ", "NA", "N/A", ".", "NaN", "MISSING"))
+head(data_employee)
+glimpse(data_employee)
+
+#Lets check for missing variables for a start
+sapply(data_employee, function(x) sum(is.na(x)))
+sum(is.na(data_employee))
+plot_missing(data_employee)
+#42086 observaions are missing. JObEndingYear has 61% missing values. When looking at the data it looks like
+#there is a '1' of the employee quit and a 'NA' if the employee stayed. RatingCeo and BusinessOutlook have
+#44.05 and 43.83% respectively. The plot_missing function suggests that it is bad and we should remove them.
+#Lets see later if that is necessary. 
 
 #Lets remove some of the variables we are sure are not giving anything to the analysis. For example ID variables and timestamps:
-library(dplyr)
 data_employee <- data_employee %>%
   select(-c(reviewId, reviewDateTime))
 
+#Lets convert the isCurrentJob variable into 1 and 0
+data_employee$isCurrentJob <- ifelse(is.na(data_employee$isCurrentJob), 0, data_employee$isCurrentJob)
+#data_employee$isCurrentJob <-ifelse(data_employee$isCurrentJob == "1",1,0)
+
+# Calculate turnover rate
+data_employee %>%
+  count(isCurrentJob)
+
+data_employee %>%
+  summarize(Turnover_level = 1-(mean(isCurrentJob)))
+#39.1% od the respondants are not from a current employee - Which is quite many, but the data is gathered
+#for a long period of time.
+
+#We can look at which location has the most turnover
+#Department with Turnover
+employee_status <- data_employee %>%
+  group_by(employmentStatus) %>%
+  summarize(Turnover_level = mean(isCurrentJob))
+
+ggplot(employee_status, aes(x = employmentStatus, y = Turnover_level, fill=employmentStatus)) + 
+  geom_col()+ggtitle("Location&Turnover") + 
+  theme(plot.title = element_text(size = 20, face = "bold"))
+
 # I select the columns i want to convert to factors
 str(data_employee)
+data_employee$ratingOverall <- factor(data_employee$ratingOverall)
 data_employee$ratingCeo <- factor(data_employee$ratingCeo)
 data_employee$ratingBusinessOutlook <- factor(data_employee$ratingBusinessOutlook)
+data_employee$ratingWorkLifeBalance <- factor(data_employee$ratingWorkLifeBalance)
+data_employee$ratingCultureAndValues <- factor(data_employee$ratingCultureAndValues)
+data_employee$ratingDiversityAndInclusion <- factor(data_employee$ratingDiversityAndInclusion)
+data_employee$ratingSeniorLeadership <- factor(data_employee$ratingSeniorLeadership)
 data_employee$ratingRecommendToFriend <- factor(data_employee$ratingRecommendToFriend)
+data_employee$ratingCareerOpportunities <- factor(data_employee$ratingCareerOpportunities)
+data_employee$ratingCompensationAndBenefits <- factor(data_employee$ratingCompensationAndBenefits)
+data_employee$isCurrentJob <- factor(data_employee$isCurrentJob)
 data_employee$employmentStatus <- factor(data_employee$employmentStatus)
+data_employee$jobEndingYear <- factor(data_employee$jobEndingYear)
 str(data_employee)
-
-data_employee$isCurrentJob <- ifelse(is.na(data_employee$isCurrentJob), 0, data_employee$isCurrentJob)
-#The job title and location might not be needed, but lets keep them and see if they still make sense.
 
 #The overall task to do is to predict the overall rating of the company using the variables that are necessary. It is a large data set so it
 #is important to pay attention to the feature engineering steps, so we have the best data to analyse on.
 
-#Lets look at the missing observations. It seems like there could be a lot:
-library(visdat)
-library(DataExplorer)
-sum(is.na(data_employee))
-#42086 observaions are missing
-
-#Lets look at it visually (e.g. plot)
-vis_miss(data_employee, cluster = TRUE) #visdat library
-#It seems that RatingCeo, RatingBusinessOutlook, RatingRecoToFriend are missing at the same time. Maybe it is questions that some employees do not
-#find really relevant or dont have an opinion on that. 
-
-plot_missing(data_employee)
-#The three variables mentioned have a high missing value percentage, and can arguably be discarded. JobEndingYear has 61% missing values which is high.
-#It makes sense though because not all the employees have left the company of course. It is questionable what this variable can give as insight.
 #Lets look at the data:
 summary(data_employee)
 #When looking at the data we can see that IsCurrentJob only has the observation of 1. We might delete this one. 
 data_employee <- data_employee %>%
   select(-c(jobEndingYear, jobTitle.text, location.name))
 
-#Lets look at the target varible and its distribution
+#Lets look at the target variable and its distribution
 par(mfrow=c(1,4))
 hist(data_employee$ratingOverall, breaks = 20, col = "red", border = "red") 
 #A bit left skewed. It is a good overall rating for the company with most observations within rating 4 and 5.
@@ -85,11 +115,11 @@ caret::nearZeroVar(data_employee, saveMetrics = TRUE) %>%
   filter(nzv)
 #We dont have any. We might have deleted them alredy. Good Job!
 
+
 #scatterplot   
 #pairs(data_employee)
 
 #Lets se the different correlations between the numeric variables.
-str(data_employee)
 library(corrplot)
 num <- c("ratingOverall", "ratingWorkLifeBalance", "ratingCultureAndValues", "ratingDiversityAndInclusion", "ratingSeniorLeadership",
          "ratingCareerOpportunities", "ratingCompensationAndBenefits", "lengthOfEmployment")
@@ -106,18 +136,3 @@ corrplot(cm, type="upper", tl.pos="d", method="number", diag=TRUE)
 plot_bar(data_employee)
 #There is no need to look at JobTitle and LocationName
 #Overall it looks fine. Continue!
-
-#Lets have a quick look at the assumptions:
-library(car)
-library(performance)
-library(easystats)
-library(see)
-test_lm <- lm(ratingOverall ~ ratingOverall+ratingWorkLifeBalance+ratingCultureAndValues+ratingDiversityAndInclusion+ratingSeniorLeadership+
-              ratingCareerOpportunities+ratingCompensationAndBenefits+lengthOfEmployment, data = data_employee)
-summary(test_lm)
-check_model(test_lm)
-hist(test_lm$residuals)
-plot(predict(test_lm), rstudent(test_lm))
-
-library(readr)
-write_csv(data_employee,"data_employee.csv")

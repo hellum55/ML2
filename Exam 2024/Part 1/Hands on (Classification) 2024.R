@@ -1,7 +1,4 @@
-# Case study: "Tous" 
 # Machine Learning for BI II
-# Version: 2023 - my version -----incl . LR, regularized reg in addition and svm solution
-
 library(tidyverse)
 library(caTools)
 library(gtools)
@@ -43,7 +40,10 @@ library(PRROC)
 #Read in the data
 data_employee <- read.csv("data_employee.csv", stringsAsFactors=TRUE)
 
-#Convert the ratingOverall into a binary class
+#It is a bit odd if we are expected to classify a multiclass model with 5 different outcomes. It seems really difficult
+# so i will convert the ratingOverall into a binary class. Whether they are satisfied (rating > 3) or not satisfied (rating <= 3).
+#I have no idea id this is right...
+data_employee$ratingOverall <- as.numeric(data_employee$ratingOverall)
 Satisfied = rep(0, length(data_employee$ratingOverall))
 Satisfied[data_employee$ratingOverall >= 4] = "Satisfied"
 Satisfied[data_employee$ratingOverall <= 3] = "Not.Satisfied"
@@ -54,16 +54,34 @@ data_employee$Satisfied = as.factor(data_employee$Satisfied)
 data_employee <- subset(data_employee, select = -ratingOverall)
 
 #Create the recipe
+library(rsample)
 set.seed(123)
 split <- initial_split(data_employee, prop = 0.8, strata = "Satisfied") 
 
 employee_train <- training(split)
 employee_test <- testing(split)
 
+# unbalanced
+prop.table(table(employee_train$Satisfied))
+#The baked_train dataset is unbalanced, which is good for the company. 65% of the employees are satisfied.
+
+# oversampling
+library(ROSE)
+employee_train <- ovun.sample(Satisfied~., data=employee_train, 
+                           p=0.5, seed=2, 
+                           method="over")$data
+
+prop.table(table(employee_train$Satisfied)) # more balanced after oversampling
+prop.table(table(employee_test$Satisfied))
+# reflection here (why is balancing necessary; 
+# how it helps later in evaluating accuracy; why not used for testing data)
+str(employee_train)
+
+library(recipes)
 employee_recipe <- recipe(Satisfied ~ ., data = employee_train) %>%
   step_impute_knn(all_predictors(), neighbors = 6) %>%
-  step_center(all_integer_predictors()) %>%
-  step_scale(all_integer(), -all_outcomes()) %>%
+  step_center(all_numeric_predictors()) %>%
+  step_scale(all_numeric_predictors(), -all_outcomes()) %>%
   step_dummy(all_nominal_predictors(), one_hot = F) %>%
   step_nzv(all_predictors(), -all_outcomes())
 
@@ -73,22 +91,8 @@ prepare$steps
 baked_train <- bake(prepare, new_data = employee_train)
 baked_test <- bake(prepare, new_data = employee_test)
 
-# unbalanced
-prop.table(table(baked_train$Satisfied))
-#The baked_train dataset is unbalanced, which is good for the company. 65% of the employees are satisfied.
-
-# oversampling
-baked_train <- ovun.sample(Satisfied~., data=baked_train, 
-                          p=0.5, seed=2, 
-                          method="over")$data
-
-prop.table(table(baked_train$Satisfied)) # more balanced after oversampling
-prop.table(table(baked_test$Satisfied))
-# reflection here (why is balancing necessary; 
-# how it helps later in evaluating accuracy; why not used for testing data)
-
 #### Classification
-modelComparison = NULL 
+modelComparison = NULL
 modelComparison = data.frame() 
 
 # Decision trees ------------------------------------------------------------
@@ -121,6 +125,7 @@ tree.conf <- confusionMatrix(tree.class.pred, real.pred,
                 mode = "prec_recall")
 
 # ROC and AUC
+library(caTools)
 tree.auc = colAUC(tree.scoring , real.pred, plotROC = TRUE) 
 
 modelComparison = rbind(modelComparison, 
@@ -170,12 +175,6 @@ modelComparison = rbind(modelComparison,
                                    recall_sensitivity = rfmodel.conf[[4]][[6]], 
                                    specificity = rfmodel.conf[[4]][[2]], 
                                    auc = rf.auc))
-rfmodel.conf[[3]][[1]]
-rfmodel.conf[[3]][[2]]
-rfmodel.conf[[4]][[5]]
-rfmodel.conf[[4]][[6]]
-rfmodel.conf[[4]][[2]]
-rf.auc
 
 # 3) xgboost
 model.xgboost <- train(Satisfied ~ ., baked_train,
@@ -227,30 +226,37 @@ library(recipes)
 set.seed(123)
 
 # Randomly select 50% of the rows from the data
-data_employee_half <- data_employee[sample(nrow(data_employee), nrow(data_employee) * 0.15), ]
+data_employee_small <- data_employee[sample(nrow(data_employee), nrow(data_employee) * 0.15), ]
 
-split <- initial_split(data_employee_half, prop = 0.8, strata = "Satisfied") 
+split_small <- initial_split(data_employee_small, prop = 0.7, strata = "Satisfied") 
 
-employee_train <- training(split)
-employee_test <- testing(split)
+employee_train_small <- training(split_small)
+employee_test_small <- testing(split_small)
 
-employee_recipe <- recipe(Satisfied ~ ., data = employee_train) %>%
+employee_train_small <- ovun.sample(Satisfied~., data=employee_train_small, 
+                              p=0.5, seed=2, 
+                              method="over")$data
+
+prop.table(table(employee_train_small$Satisfied)) # more balanced after oversampling
+prop.table(table(employee_test_small$Satisfied))
+
+employee_recipe_small <- recipe(Satisfied ~ ., data = employee_train_small) %>%
   step_impute_knn(all_predictors(), neighbors = 6) %>%
-  step_center(all_integer_predictors()) %>%
-  step_scale(all_integer(), -all_outcomes()) %>%
+  step_center(all_numeric_predictors()) %>%
+  step_scale(all_numeric_predictors(), -all_outcomes()) %>%
   step_dummy(all_nominal_predictors(), one_hot = F) %>%
   step_nzv(all_predictors(), -all_outcomes())
 
-prepare <- prep(employee_recipe, training = employee_train)
-prepare$steps
+prepare_small <- prep(employee_recipe_small, training = employee_train_small)
+prepare_small$steps
 
-baked_train <- bake(prepare, new_data = employee_train)
-baked_test <- bake(prepare, new_data = employee_test)
+baked_train_small <- bake(prepare_small, new_data = employee_train_small)
+baked_test_small <- bake(prepare_small, new_data = employee_test_small)
 
 train.param <-  trainControl(method = "cv", number = 5, classProbs = TRUE, summaryFunction = twoClassSummary)
 
 set.seed(5628)  
-svm_rad <- train(Satisfied ~ ., baked_train,
+svm_rad <- train(Satisfied ~ ., baked_train_small,
                  method = "svmRadial",               
                  metric = "Sens",  # kappa not available
                  trControl = train.param,
@@ -258,9 +264,9 @@ svm_rad <- train(Satisfied ~ ., baked_train,
 svm_rad
 
 # confusion matrix + KAPPA 
-real.pred <- baked_test$Satisfied #
-svm.class.pred <- predict(svm_rad, baked_test, type = "raw") 
-svm.scoring <- predict(svm_rad, baked_test, type = "prob") [, "Satisfied"] 
+real.pred <- baked_test_small$Satisfied #
+svm.class.pred <- predict(svm_rad, baked_test_small, type = "raw") 
+svm.scoring <- predict(svm_rad, baked_test_small, type = "prob") [, "Satisfied"] 
 
 svm.conf <- confusionMatrix(data = svm.class.pred, reference = real.pred, positive = "Satisfied", mode = "prec_recall") 
 
@@ -269,6 +275,7 @@ svm.auc = colAUC(svm.scoring, real.pred, plotROC = TRUE)
 
 #Save results
 modelComparison = rbind(modelComparison, data.frame(model = 'svm', accuracy = svm.conf[[3]][[1]], kappa = svm.conf[[3]][[2]], precision = svm.conf[[4]][[5]], recall_sensitivity = svm.conf[[4]][[6]], specificity = svm.conf[[4]][[2]], auc = svm.auc))
+modelComparison
 
 
 
