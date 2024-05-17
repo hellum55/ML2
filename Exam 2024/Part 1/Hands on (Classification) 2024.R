@@ -40,45 +40,43 @@ library(PRROC)
 #Read in the data
 data_employee <- read.csv("data_employee.csv", stringsAsFactors=TRUE)
 
-#It is a bit odd if we are expected to classify a multiclass model with 5 different outcomes. It seems really difficult
-# so i will convert the ratingOverall into a binary class. Whether they are satisfied (rating > 3) or not satisfied (rating <= 3).
-#I have no idea id this is right...
-data_employee$ratingOverall <- as.numeric(data_employee$ratingOverall)
-Satisfied = rep(0, length(data_employee$ratingOverall))
-Satisfied[data_employee$ratingOverall >= 4] = "Satisfied"
-Satisfied[data_employee$ratingOverall <= 3] = "Not.Satisfied"
-data_employee=data.frame(data_employee,Satisfied)
+#We have to make the target variable a factor because the job is to predict the ratings as a classification problem:
 str(data_employee)
-data_employee$Satisfied = as.factor(data_employee$Satisfied)
-#Remove ratingOverall
-data_employee <- subset(data_employee, select = -ratingOverall)
+data_employee$ratingOverall <- factor(data_employee$ratingOverall, levels = c('1', '2', '3', '4', '5'))
+data_employee$ratingOverall <- as.character(data_employee$ratingOverall)
+data_employee$ratingOverall[data_employee$ratingOverall == '0'] <- 'Zero'
+
+data_employee$ratingOverall <- as.numeric(as.character(data_employee$ratingOverall))
+levels(data_employee$ratingOverall)
 
 #Create the recipe
 library(rsample)
 set.seed(123)
-split <- initial_split(data_employee, prop = 0.8, strata = "Satisfied") 
+split <- initial_split(data_employee, prop = 0.8, strata = "ratingOverall") 
 
 employee_train <- training(split)
 employee_test <- testing(split)
 
-# unbalanced
-prop.table(table(employee_train$Satisfied))
-#The baked_train dataset is unbalanced, which is good for the company. 65% of the employees are satisfied.
+# imbalanced
+prop.table(table(employee_train$ratingOverall))
+prop.table(table(employee_test$ratingOverall))
+#It is a imbalanced data set with the majority of the observations => 3, which is good for the company but can be hard to predict on.
 
-# oversampling
+#This can only be done with 2 levels. It ensures that the data are balanced.
 library(ROSE)
-employee_train <- ovun.sample(Satisfied~., data=employee_train, 
+employee_train <- ovun.sample(ratingOverall~., data=employee_train, 
                            p=0.5, seed=2, 
                            method="over")$data
 
 prop.table(table(employee_train$Satisfied)) # more balanced after oversampling
 prop.table(table(employee_test$Satisfied))
 # reflection here (why is balancing necessary; 
-# how it helps later in evaluating accuracy; why not used for testing data)
-str(employee_train)
+#Later on it will help the relevance of the model. If the test set contains 80% of one class the model can simply just predict that outcome every time, but it
+#will never be a good model, because it does not capture the other outcome, it just learns to predict one class. Not very nice!
+
 
 library(recipes)
-employee_recipe <- recipe(Satisfied ~ ., data = employee_train) %>%
+employee_recipe <- recipe(ratingOverall ~ ., data = employee_train) %>%
   step_impute_knn(all_predictors(), neighbors = 6) %>%
   step_center(all_numeric_predictors()) %>%
   step_scale(all_numeric_predictors(), -all_outcomes()) %>%
@@ -90,6 +88,8 @@ prepare$steps
 
 baked_train <- bake(prepare, new_data = employee_train)
 baked_test <- bake(prepare, new_data = employee_test)
+
+str(baked_train)
 
 #### Classification
 modelComparison = NULL
@@ -103,7 +103,7 @@ train.param <- trainControl(method = "cv", number = 5)
 # 1) basic decision tree
 tune.grid <- data.frame(.maxdepth = 3:10, 
                         .mincriterion = c(.1, .2, .3, .4))
-tree.model <- train(Satisfied ~., baked_train,
+tree.model <- train(ratingOverall ~., baked_train,
                     method = "ctree2",
                     metric = "Kappa",
                     trControl = train.param,
@@ -112,17 +112,18 @@ tree.model <- train(Satisfied ~., baked_train,
 tree.model
 
 # confusion matrix + KAPPA 
-real.pred <- baked_test$Satisfied 
+real.pred <- baked_test$ratingOverall 
 tree.class.pred <- predict(tree.model, 
                            baked_test, type = "raw") 
 
 tree.scoring <- predict(tree.model, 
                         baked_test, 
-                        type = "prob") [, "Satisfied"]
+                        type = "prob")
 
 tree.conf <- confusionMatrix(tree.class.pred, real.pred,
-                positive = "Satisfied",
+                positive = "ratingOverall",
                 mode = "prec_recall")
+tree.conf
 
 # ROC and AUC
 library(caTools)
@@ -139,7 +140,7 @@ modelComparison = rbind(modelComparison,
 
 
 # random forest -----------------------------------------------------------------------------
-rf.model <- train(Satisfied ~ ., baked_train,
+rf.model <- train(ratingOverall ~ ., baked_train,
                   method = "rf", 
                   ntree = 1000,
                   metric = "Kappa",
@@ -149,17 +150,17 @@ rf.model <- train(Satisfied ~ ., baked_train,
 rf.model
 
 # confusion matrix + KAPPA 
-real.pred <- baked_test$Satisfied 
+real.pred <- baked_test$ratingOverall 
 rfmodel.class.pred <- predict(rf.model, 
                               baked_test, 
                               type = "raw") 
 
 rfmodel.scoring <- predict(rf.model, 
                            baked_test, 
-                           type = "prob") [, "Satisfied"] 
+                           type = "prob")
 
 rfmodel.conf <- confusionMatrix(rfmodel.class.pred, real.pred,
-                                positive = "Satisfied", 
+                                positive = "ratingOverall", 
                                 mode = "prec_recall")
 
 # ROC and AUC
@@ -175,9 +176,10 @@ modelComparison = rbind(modelComparison,
                                    recall_sensitivity = rfmodel.conf[[4]][[6]], 
                                    specificity = rfmodel.conf[[4]][[2]], 
                                    auc = rf.auc))
+rfmodel.conf[[4]][[2]]
 
 # 3) xgboost
-model.xgboost <- train(Satisfied ~ ., baked_train,
+model.xgboost <- train(ratingOverall ~ ., baked_train,
                        method = "xgbTree",
                        metric = "Kappa",
                        tuneGrid = expand.grid(max_depth=3:6,
@@ -193,16 +195,16 @@ model.xgboost
 
 
 # confusion matrix + KAPPA 
-real.pred <- baked_test$Satisfied 
+real.pred <- baked_test$ratingOverall 
 xgb.class.pred <- predict(model.xgboost, 
                           baked_test, 
                           type = "raw") 
 xgb.scoring <- predict(model.xgboost, 
                        baked_test, 
-                       type = "prob") [, "Satisfied"] 
+                       type = "prob") 
 xgb.conf <- confusionMatrix(data = xgb.class.pred, 
                             reference = real.pred, 
-                            positive = "Satisfied", 
+                            positive = "1", 
                             mode = "prec_recall") 
 
 # ROC and AUC
@@ -217,6 +219,8 @@ modelComparison = rbind(modelComparison,
                                    recall_sensitivity = xgb.conf[[4]][[6]], 
                                    specificity = xgb.conf[[4]][[2]], 
                                    auc = xgb.auc))
+
+xgb.conf
 
 
 # 4) SVM -----------------------------------------------------------------------------------

@@ -8,6 +8,7 @@ library(ggplot2)
 # Read the Excel file with specified column types
 data_employee <- read_xls('Data.xls', 
                           na = c("", " ", "NA", "N/A", ".", "NaN", "MISSING"))
+str(data_employee)
 head(data_employee)
 glimpse(data_employee)
 
@@ -136,3 +137,19 @@ corrplot(cm, type="upper", tl.pos="d", method="number", diag=TRUE)
 plot_bar(data_employee)
 #There is no need to look at JobTitle and LocationName
 #Overall it looks fine. Continue!
+
+
+########## We might need to do this #########
+
+#It is a bit odd if we are expected to classify a multiclass model with 5 different outcomes. It seems really difficult
+# so i will convert the ratingOverall into a binary class. Whether they are satisfied (rating > 3) or not satisfied (rating <= 3).
+#I have no idea id this is right...
+data_employee$ratingOverall <- as.numeric(data_employee$ratingOverall)
+Satisfied = rep(0, length(data_employee$ratingOverall))
+Satisfied[data_employee$ratingOverall >= 4] = "Satisfied"
+Satisfied[data_employee$ratingOverall <= 3] = "Not.Satisfied"
+data_employee=data.frame(data_employee,Satisfied)
+str(data_employee)
+data_employee$Satisfied = as.factor(data_employee$Satisfied)
+#Remove ratingOverall
+data_employee <- subset(data_employee, select = -ratingOverall)
