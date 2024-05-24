@@ -135,9 +135,6 @@ caret::nearZeroVar(data_employee, saveMetrics = TRUE) %>%
   filter(nzv)
 #IsCurentJob has zero variance, but the variable has not been transformed yet into 0, 1. Right now it only conatins 0's.
 
-#scatterplot   
-pairs(data_employee)
-
 #Lets se the different correlations between the numeric variables.
 library(corrplot)
 num <- c("ratingOverall", "ratingWorkLifeBalance", "ratingCultureAndValues", "ratingDiversityAndInclusion", "ratingSeniorLeadership",
@@ -152,6 +149,7 @@ corrplot(cm, type="upper", tl.pos="d", method="number", diag=TRUE)
 #any correlation with the target variable. The correlation is -0.04. Not much.
 
 #Lets look at the factors
+library(DataExplorer)
 plot_bar(data_employee)
 #There is no need to look at JobTitle and LocationName
 #Overall it looks fine. Continue!
@@ -282,9 +280,14 @@ p3 <- partial(dc_simple2, pred.var = c("ratingSeniorLeadership", "ratingCareerOp
 # Display plots side by side
 gridExtra::grid.arrange(p1, p2, p3, ncol = 3)
 
-#basic decision tree
+############################################# basic decision tree #########################################################################
+library(rpart)
+library(caret)       # meta engine for decision tree application
 tune.grid <- data.frame(.maxdepth = 3:10, 
                         .mincriterion = c(.1, .2, .3, .4))
+# training parameters. Here we apply 5fold-CV
+train.param <- trainControl(method = "cv", number = 5)
+
 tree.model <- train(ratingOverall ~., baked_train,
                     method = "ctree2",
                     metric = "Kappa",
@@ -299,7 +302,11 @@ tree.class.pred <- predict(tree.model,
 
 tree.scoring <- predict(tree.model, 
                         baked_test, 
-                        type = "prob")
+                        type = "prob")[,"1"]
+
+
+tree.scoring[,]
+
 
 tree.conf <- confusionMatrix(tree.class.pred, real.pred,
                 positive = "ratingOverall",
@@ -347,16 +354,46 @@ cv_mars$results %>%
 
 ggplot(cv_mars)
 
+# confusion matrix + KAPPA 
+real.pred <- baked_test$ratingOverall 
+marsmodel.class.pred <- predict(cv_mars, 
+                              baked_test, 
+                              type = "raw")
+
+marsmodel.scoring <- predict(cv_mars, 
+                           baked_test, 
+                           type = "prob")
+
+marsmodel.conf <- confusionMatrix(marsmodel.class.pred, real.pred,
+                                positive = "ratingOverall", 
+                                mode = "prec_recall")
+
+# ROC and AUC
+marsmodel.auc = colAUC(marsmodel.scoring, real.pred, plotROC = TRUE) 
+
+
+#Save results
+modelComparison = rbind(modelComparison, 
+                        data.frame(model = 'MARS', 
+                                   accuracy = marsmodel.conf[[3]][[1]], 
+                                   kappa = marsmodel.conf[[3]][[2]], 
+                                   precision = marsmodel.conf[[4]][[5]], 
+                                   recall_sensitivity = marsmodel.conf[[4]][[6]], 
+                                   specificity = marsmodel.conf[[4]][[2]], 
+                                   auc = marsmodel.auc))
+marsmodel.conf[[4]][[2]]
+
+
 # bagging ----------------------------------------------------------------------------------
 bag_model <- train(
   ratingOverall ~ .,
   data = baked_train,
   method = "treebag",
-  trControl = trainControl(method = "cv", number = 10), # 10-fold CV increases the convergence time
+  trControl = trainControl(method = "cv", number = 5), # 5-fold CV increases the convergence time
   nbagg = 200,  
   control = rpart.control(minsplit = 2, cp = 0)
 )
-ames_bag4
+bag_model
 
 #importance
 vip::vip(ames_bag2, num_features = 40, bar = FALSE)
@@ -378,6 +415,25 @@ p2 <- pdp::partial(
   autoplot()
 
 gridExtra::grid.arrange(p1, p2, nrow = 1)
+
+# confusion matrix + KAPPA 
+real.pred <- baked_test$ratingOverall 
+bag_model.class.pred <- predict(bag_model, 
+                              baked_test, 
+                              type = "raw") 
+
+bag_model.scoring <- predict(bag_model, 
+                           baked_test, 
+                           type = "prob")
+
+bag_model.conf <- confusionMatrix(bag_model.class.pred, real.pred,
+                                positive = "ratingOverall", 
+                                mode = "prec_recall")
+
+bag_model.conf
+# ROC and AUC
+rf.auc = colAUC(bag_model.scoring, real.pred, plotROC = TRUE) 
+
 
 # random forest -----------------------------------------------------------------------------
 library(ranger)   # a c++ implementation of random forest 
@@ -483,7 +539,7 @@ library(rsample)
 library(recipes)
 set.seed(123)
 
-# Randomly select 50% of the rows from the data
+# Randomly select 15% of the rows from the data
 data_employee_small <- data_employee[sample(nrow(data_employee), nrow(data_employee) * 0.15), ]
 
 split_small <- initial_split(data_employee_small, prop = 0.7, strata = "Satisfied") 
