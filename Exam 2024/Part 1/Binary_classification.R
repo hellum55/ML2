@@ -207,7 +207,7 @@ bag_model <- train(
   data = baked_train,
   method = "treebag",
   trControl = trainControl(method = "cv", number = 5), # 5-fold CV increases the convergence time
-  nbagg = 200,  
+  nbagg = 100,  
   control = rpart.control(minsplit = 2, cp = 0)
 )
 bag_model
@@ -289,6 +289,53 @@ modelComparison = rbind(modelComparison,
                                    recall_sensitivity = rfmodel.conf[[4]][[6]], 
                                    specificity = rfmodel.conf[[4]][[2]], 
                                    auc = rf.auc))
+# Gradient boosting --------------------------------------------------------------------------------------------------------------------------
+library(gbm) 
+set.seed(123)  # for reproducibility
+ames_gbm1 <- gbm(
+  formula = job_satisfaction ~ .,
+  data = baked_train,
+  distribution = "bernoulli",  # SSE loss function
+  n.trees = 500,
+  shrinkage = 0.1,
+  interaction.depth = 3,
+  n.minobsinnode = 10,
+  cv.folds = 5
+)
+
+# find index for number trees with minimum CV error
+best <- which.min(ames_gbm1$cv.error)
+
+# get MSE and compute RMSE
+sqrt(ames_gbm1$cv.error[best])
+## [1] 23240.38
+
+# confusion matrix + KAPPA 
+real.pred <- baked_train$job_satisfaction
+xgb.class.pred <- predict(model.xgboost, 
+                          baked_train, 
+                          type = "raw") 
+xgb.scoring <- predict(model.xgboost, 
+                       baked_train, 
+                       type = "prob")[, "Satisfied"] 
+xgb.conf <- confusionMatrix(data = xgb.class.pred, 
+                            reference = real.pred, 
+                            positive = "Satisfied", 
+                            mode = "prec_recall") 
+
+# ROC and AUC
+xgb.auc = colAUC(xgb.scoring, real.pred, plotROC = TRUE) 
+
+#Save results
+modelComparison = rbind(modelComparison, 
+                        data.frame(model = 'xgb tree', 
+                                   accuracy = xgb.conf[[3]][[1]], 
+                                   kappa = xgb.conf[[3]][[2]], 
+                                   precision = xgb.conf[[4]][[5]], 
+                                   recall_sensitivity = xgb.conf[[4]][[6]], 
+                                   specificity = xgb.conf[[4]][[2]], 
+                                   auc = xgb.auc))
+
 
 # xgboost -------------------------------------------------------------------------------------------------------------------------------------
 #The hyperparamters are:
@@ -374,13 +421,72 @@ baked_test_small <- bake(prepare_small, new_data = employee_test_small)
 
 train.param <-  trainControl(method = "cv", number = 5, classProbs = TRUE, summaryFunction = twoClassSummary)
 
+# Tune an SVM with radial basis kernel 
+set.seed(1854)  
+employee_svm <- train(
+  job_satisfaction ~ ., 
+  data = baked_train_small,
+  method = "svmRadial",               
+  trControl = trainControl(method = "cv", number = 5),
+  tuneLength = 10
+)
+# Plot results
+ggplot(employee_svm) + theme_light()
+
+# Print results
+employee_svm$results 
+# notice the default is accuracy
+
+# RE-run with trContol to get the class probabilities for AUC/ROC     
+ctrl <- trainControl(
+  method = "cv", 
+  number = 10, 
+  classProbs = TRUE,             
+  summaryFunction = twoClassSummary  # also needed for AUC/ROC
+)
+
+# Tune an SVM
 set.seed(5628)  
-svm_rad <- train(job_satisfaction ~ ., baked_train_small,
-                 method = "svmRadial",               
-                 metric = "Sens",  # kappa not available
-                 trControl = train.param,
-                 tuneLength = 10)
-svm_rad
+employee_svm_auc <- train(
+  job_satisfaction ~ ., 
+  data = baked_train_small,
+  method = "svmRadial",               
+  metric = "ROC",  # explicitly set area under ROC curve as criteria        
+  trControl = ctrl,
+  tuneLength = 10
+)
+
+confusionMatrix(employee_svm_auc)
+# interpret
+
+# Feature importance 
+# Create a wrapper to retain the predicted class probabilities for the class of interest (in this case, Yes)
+library(kernlab)  # also for fitting SVMs 
+
+# Model interpretability packages
+library(pdp)      # for partial dependence plots, etc.
+library(vip)      # for variable importance plots
+
+prob_satisfied <- function(object, newdata) {
+  predict(object, newdata = newdata, type = "prob")[, "Satisfied"]
+}
+
+#variable importance plot
+set.seed(2827)  # for reproducibility
+vip::vip(employee_svm_auc, method = "permute", event_level = "second", nsim = 5, train = baked_train_small, 
+    target = "job_satisfaction", metric = "roc_auc", reference_class = "Satisfied", 
+    pred_wrapper = prob_satisfied)
+
+#construct PDP (feature effect plots are on the probability scale)
+features <- c("OverTime", "WorkLifeBalance", 
+              "JobSatisfaction", "JobRole")
+pdps <- lapply(features, function(x) {
+  partial(churn_svm_auc, pred.var = x, which.class = 2,        # since the predicted probabilities from our model come in two columns (No and Yes), we specify which.class = 2 so that our interpretation is in reference to predicting Yes
+          prob = TRUE, plot = TRUE, plot.engine = "ggplot2") +
+    coord_flip()
+})
+grid.arrange(grobs = pdps,  ncol = 2)
+# interpret
 
 # confusion matrix + KAPPA 
 real.pred <- baked_train_small$job_satisfaction #
@@ -445,3 +551,7 @@ p2 <- pdp::partial(
   autoplot()
 
 gridExtra::grid.arrange(p1, p2, nrow = 1)
+#When looking at the varibale importance for bagging models and random forest model it is not quite the same as with regression models or logistic models.
+#RF and bagging consists of hundreds of trees and the way the variable importance are generated are with adding the amount a given predictor has decreased
+#the gini index on the splits over all the different deep trees. The largest mean decrease in gini index for this data set
+#is wheter you can recommend the job to a friend are the rating an employee gave the culture.
