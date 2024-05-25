@@ -25,8 +25,8 @@ data_employee <- subset(data_employee, select = -ratingOverall)
 str(data_employee)
 # Convert the categorical variables into factors for the analysis:
 #data_employee$ratingOverall <- factor(data_employee$ratingOverall)
-data_employee$ratingCeo <- factor(data_employee$ratingCeo)
 data_employee$ratingBusinessOutlook <- factor(data_employee$ratingBusinessOutlook)
+data_employee$ratingCeo <- factor(data_employee$ratingCeo)
 #data_employee$ratingWorkLifeBalance <- factor(data_employee$ratingWorkLifeBalance)
 #data_employee$ratingCultureAndValues <- factor(data_employee$ratingCultureAndValues)
 #data_employee$ratingDiversityAndInclusion <- factor(data_employee$ratingDiversityAndInclusion)
@@ -389,6 +389,7 @@ modelComparison = rbind(modelComparison,
 
 # 4) SVM -----------------------------------------------------------------------------------
 #Use only a part of the data
+library(caret)
 set.seed(123)
 
 # Randomly select 15% of the rows from the data
@@ -399,6 +400,7 @@ split_small <- initial_split(data_employee_small, prop = 0.7, strata = "job_sati
 employee_train_small <- training(split_small)
 employee_test_small <- testing(split_small)
 
+library(ROSE)
 employee_train_small <- ovun.sample(job_satisfaction~., data=employee_train_small, 
                                     p=0.5, seed=2, 
                                     method="over")$data
@@ -406,6 +408,7 @@ employee_train_small <- ovun.sample(job_satisfaction~., data=employee_train_smal
 prop.table(table(employee_train_small$job_satisfaction)) # more balanced after oversampling
 prop.table(table(employee_test_small$Satisfied))
 
+library(recipes)
 employee_recipe_small <- recipe(job_satisfaction ~ ., data = employee_train_small) %>%
   #step_impute_knn(all_predictors(), neighbors = 6) %>%
   step_center(all_numeric_predictors()) %>%
@@ -504,6 +507,44 @@ modelComparison
 
 #The model with the highest and also highest kappa coefficients is the random forest model. with 99% accuracy and 98%, which is quite crazy. We might need some more data.
 #The kappa coefficients is an estimate of how much better the model are rather than just random guessing. Lets have a look on how well it does on the test set:
+# ROC plot based on caTools library; AUC is displayed in the console
+library(caTools)
+par(mfrow=c(1,1))
+satisfaction_prob <- predict(employee_svm_auc, baked_test_small, type = "prob")$job_satisfaction
+colAUC(satisfaction_prob, baked_test_small$job_satisfaction, plotROC = TRUE)
+
+#Question d: ####
+library(ROCR)
+knn_prob <- predict(cv_model_knn, baked_test, type = "prob")$Below  # predicted prob.
+perf_knn <- prediction(knn_prob, baked_test$PriceDummy) 
+roc_ROCR_model_knn <-  performance(perf_knn, measure = "tpr", x.measure = "fpr")
+plot(roc_ROCR_model_knn , col = "red", lty = 2, main = "ROC curve Model knn")
+abline(a = 0, b = 1)
+
+#When we are looking at the ROC-curve it is simply the best to reach the left top corner where we predict all true positive. The important thing
+#is to find a trade off between true positive rate and the false positive rate. As mentioned, if it very important that we predict all
+#above classes correclty 
+knn_prob <- predict(cv_model_knn, baked_test, type = "prob")$Above
+probabilities = as.data.frame(knn_prob)
+
+# create empty accuracy table
+accT = c()
+# compute accuracy per cutoff
+for (cut in seq (0, 1, 0.1)) {
+  cm <- confusionMatrix(factor(ifelse(probabilities  > cut,"Above", "Below")), 
+                        factor(baked_test$PriceDummy))
+  accT = c(accT, cm$overall[1])}
+
+# plot 
+plot(accT ~ seq(0,1, 0.1), xlab= "Cutoff value", ylab ="", type="l", ylim=c(0,1))
+lines (1-accT ~ seq(0,1, 0.1), type = "l", lty=2)
+legend ("center", c("accuracy", "overall error"), lty  = c(1,2), merge = TRUE)
+#The accuracy for cutoff values from 0-0.8(ish) are pretty much the same. When the cutoff value exceeds 0.8-0.85, the accuracy begind to drop¨
+#Which is not preferable because we wan a model that has the highest accuracy. 
+
+
+
+```
 
 #Random forest on test set --------------------------------------------------------------------------------------------------------------
 # confusion matrix + KAPPA 
