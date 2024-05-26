@@ -137,7 +137,7 @@ caret::nearZeroVar(data_employee, saveMetrics = TRUE) %>%
 
 #Lets se the different correlations between the numeric variables.
 library(corrplot)
-num <- c("ratingOverall", "ratingWorkLifeBalance", "ratingCultureAndValues", "ratingDiversityAndInclusion", "ratingSeniorLeadership",
+num <- c("ratingWorkLifeBalance", "ratingCultureAndValues", "ratingDiversityAndInclusion", "ratingSeniorLeadership",
          "ratingCareerOpportunities", "ratingCompensationAndBenefits", "lengthOfEmployment")
 cm <- cor(data_employee[num], use = "complete.obs")
 cm
@@ -153,22 +153,6 @@ library(DataExplorer)
 plot_bar(data_employee)
 #There is no need to look at JobTitle and LocationName
 #Overall it looks fine. Continue!
-
-
-########## We might need to do this #########
-
-#It is a bit odd if we are expected to classify a multiclass model with 5 different outcomes. It seems really difficult
-# so i will convert the ratingOverall into a binary class. Whether they are satisfied (rating > 3) or not satisfied (rating <= 3).
-#I have no idea id this is right...
-data_employee$ratingOverall <- as.numeric(data_employee$ratingOverall)
-Satisfied = rep(0, length(data_employee$ratingOverall))
-Satisfied[data_employee$ratingOverall >= 4] = "Satisfied"
-Satisfied[data_employee$ratingOverall <= 3] = "Not.Satisfied"
-data_employee=data.frame(data_employee,Satisfied)
-str(data_employee)
-data_employee$Satisfied = as.factor(data_employee$Satisfied)
-#Remove ratingOverall
-data_employee <- subset(data_employee, select = -ratingOverall)
 
 ############################################ BUILDING THE MODELS ###########################################################
 #Create the recipe
@@ -202,7 +186,7 @@ employee_recipe <- recipe(ratingOverall ~ ., data = employee_train) %>%
   step_impute_knn(all_predictors(), neighbors = 6) %>%
   step_center(all_numeric_predictors()) %>%
   step_scale(all_numeric_predictors(), -all_outcomes()) %>%
-  step_dummy(all_nominal_predictors(), one_hot = F) %>%
+  step_dummy(all_nominal_predictors(), one_hot = T) %>%
   step_nzv(all_predictors(), -all_outcomes())
 
 prepare <- prep(employee_recipe, training = employee_train)
@@ -233,25 +217,16 @@ dc_simple <- rpart(
   method  = "anova"
 )
 dc_simple
-#What we can see from the DC output is that, we start with 13106 at the root node, adn the 
+#What we can see from the DC output is that, we start with 13106 at the root node, and the 
 #first variable we split on is (the largest SSE reduction) is RatingRecommendToFried < 0.5, with
 #3990 observations. On the 3 node it is the same variable RatingRecommendToFried with a mean of 4.18 in rating. which
-#tells us that it is a very important variabel to predict the overall raring. 
+#tells us that it is a very important variable to predict the overall raring. 
 #We can plot the tree:
 rpart.plot(dc_simple)
 plotcp(dc_simple)
 #The rpart function by default performs 10fold-CV. The function also applies the cost complexity function (alpha),
 #to prune the tree. The plot suggests to do 6 terminal nodes, because the dash in the dot reaches the horizontal line
 #which means that it falls within 1SE. 
-
-dc_simple1 <- rpart(
-  formula = ratingOverall ~ .,
-  data    = baked_train,
-  method  = "anova", 
-  control = list(cp = 0, xval = 6)
-)
-plotcp(dc_simple1)
-abline(v = 11, lty = "dashed")
 
 #Using caret to show Accuracy. It applies 10fold-CV with 20 alpha parameters to tune on. Lower alphas = deeper trees, and 
 #helps to minimize error. 
@@ -293,7 +268,7 @@ tree.model <- train(ratingOverall ~., baked_train,
                     metric = "Kappa",
                     trControl = train.param,
                     tuneGrid = tune.grid) 
-tree.model
+ggplot(tree.model)
 
 # confusion matrix + KAPPA 
 real.pred <- baked_test$ratingOverall 
@@ -590,9 +565,3 @@ svm.auc = colAUC(svm.scoring, real.pred, plotROC = TRUE)
 #Save results
 modelComparison = rbind(modelComparison, data.frame(model = 'svm', accuracy = svm.conf[[3]][[1]], kappa = svm.conf[[3]][[2]], precision = svm.conf[[4]][[5]], recall_sensitivity = svm.conf[[4]][[6]], specificity = svm.conf[[4]][[2]], auc = svm.auc))
 modelComparison
-
-
-
-
-
-

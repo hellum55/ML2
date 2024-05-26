@@ -15,16 +15,23 @@ data_employee$isCurrentJob <- ifelse(is.na(data_employee$isCurrentJob), 0, data_
 #Transforming the ratingOverall variable into a binary variable. If the rating is => 4 the employee is satisfied
 #If the rating is <= 3 the employee is not satisfied
 job_satisfaction = rep(0, length(data_employee$ratingOverall))
-job_satisfaction[data_employee$ratingOverall >= 4] = "Satisfied"
-job_satisfaction[data_employee$ratingOverall <= 3] = "Not_Satisfied"
+job_satisfaction[data_employee$ratingOverall >= 4] = "1"
+job_satisfaction[data_employee$ratingOverall <= 3] = "0"
 data_employee=data.frame(data_employee,job_satisfaction)
 #Removing ratingOverall variable
 data_employee <- subset(data_employee, select = -ratingOverall)
+data_employee$job_satisfaction <- factor(data_employee$job_satisfaction)
+
+#Check the distribution of the target variable
+prop.table(table(data_employee$job_satisfaction))
+#        0         1 
+# 0.3492645 0.6507355 
+
 
 #Check the variable types of the variables:
 str(data_employee)
 # Convert the categorical variables into factors for the analysis:
-#data_employee$ratingOverall <- factor(data_employee$ratingOverall)
+data_employee$job_satisfaction <- factor(data_employee$job_satisfaction)
 data_employee$ratingBusinessOutlook <- factor(data_employee$ratingBusinessOutlook)
 data_employee$ratingCeo <- factor(data_employee$ratingCeo)
 #data_employee$ratingWorkLifeBalance <- factor(data_employee$ratingWorkLifeBalance)
@@ -56,14 +63,14 @@ prop.table(table(employee_train$job_satisfaction))
 prop.table(table(employee_test$job_satisfaction))
 #It is a imbalanced data set with the majority of the observations => 3, which is good for the company but can be hard to predict on.
 
-#If the target variable is binary we can make sure that the test split is balanced instead of stratisfied
+#If the target variable is binary we can make sure that the test split is balanced instead of stratified
 #This can only be done with 2 levels. It ensures that the data are balanced.
 library(ROSE)
 employee_train <- ovun.sample(job_satisfaction~., data=employee_train, 
                               p=0.5, seed=2, 
                               method="over")$data
 
-employee_train <- ovun.sample(job_satisfaction~., data=employee_train, 
+employee_test <- ovun.sample(job_satisfaction~., data=employee_train, 
                               p=0.5, seed=2, 
                               method="over")$data
 
@@ -80,7 +87,7 @@ employee_recipe <- recipe(job_satisfaction ~ ., data = employee_train) %>%
   #step_impute_knn(all_predictors(), neighbors = 6) %>%
   step_center(all_numeric_predictors()) %>%
   step_scale(all_numeric_predictors(), -all_outcomes()) %>%
-  step_dummy(all_nominal_predictors(), one_hot = F) %>%
+  step_dummy(all_nominal_predictors(), one_hot = T) %>%
   step_nzv(all_predictors(), -all_outcomes())
 
 prepare <- prep(employee_recipe, training = employee_train)
@@ -98,10 +105,11 @@ modelComparison = data.frame()
 library(rpart)       # direct engine for decision tree application
 library(caret)       # meta engine for decision tree application
 
-#Using caret to show Accuracy. It applies 10fold-CV with 20 alpha parameters to tune on. Lower alphas = deeper trees, and 
-#helps to minimize error. 
+#Using caret to show Accuracy. It applies 5fold-CV with 20 alpha parameters to tune on. Lower alphas = deeper trees, and 
+#helps to minimize error. There is a maximum of 10 trees and a mini
 tune.grid <- data.frame(.maxdepth = 3:10, 
                         .mincriterion = c(.1, .2, .3, .4))
+
 # training parameters. Here we apply 5fold-CV
 train.param <- trainControl(method = "cv", number = 5)
 
@@ -114,6 +122,7 @@ tree.model <- train(job_satisfaction ~., baked_train,
 tree.model$results$Accuracy
 #The best model for the simple decision tree is a maxdepth of 9 and a mincriterion of 0.3 that yields
 #an accuracy of 0.8781 and a kappa of 0.75
+ggplot(tree.model)
 
 # confusion matrix + KAPPA 
 real.pred <- baked_train$job_satisfaction 
@@ -122,11 +131,11 @@ tree.class.pred <- predict(tree.model,
 
 tree.scoring <- predict(tree.model, 
                         baked_train, 
-                        type = "prob")[,"Satisfied"]
+                        type = "prob")[,"1"]
 
 
 tree.conf <- confusionMatrix(tree.class.pred, real.pred,
-                             positive = "Satisfied",
+                             positive = "1",
                              mode = "prec_recall")
 tree.conf
 
@@ -146,7 +155,8 @@ modelComparison = rbind(modelComparison,
 # MARS model ------------------------------------------------------------
 # Cross-validated model
 set.seed(123)  # for reproducibility
-# create a tuning grid
+# create a tuning grid. The degree of freedom ranges from 1 to 3, where 3 is the maximum flexibility. Setting this higher could lead to overfitting, because it
+#would fit the training data too good. The nprune argument decides how many terms the best model has, in combination with the degree of freedom.
 hyper_grid <- expand.grid(
   degree = 1:3, 
   nprune = seq(2, 100, length.out = 10) %>% floor()
@@ -162,15 +172,38 @@ cv_mars <- train(
 # View results
 cv_mars$bestTune
 ##    nprune degree
-## 13     23      2
+## 13     23      1
+#The best tune has 23 terms and only one degree, so no interactions between variables.
 
 cv_mars$results %>%
   filter(nprune == cv_mars$bestTune$nprune, degree == cv_mars$bestTune$degree)
 #degree nprune  Accuracy     Kappa  AccuracySD    KappaSD
-#1      2     23 0.8787923 0.7575491 0.009631602 0.01927495
+#1    1     23 0.8838859 0.7677374 0.006360627 0.01274356
 
 ggplot(cv_mars)
 #The model is performing the best with around 12-13 terms, so a rather small model actually.
+# variable importance plots
+library(vip)       # for variable importance
+library(pdp)       # for variable relationships
+p1 <- vip(cv_mars, num_features = 20, geom = "point", value = "gcv") + ggtitle("GCV")
+p2 <- vip(cv_mars, num_features = 20, geom = "point", value = "rss") + ggtitle("RSS")
+
+gridExtra::grid.arrange(p1, p2, ncol = 2)
+#From the feature plot we can tell that LentghOfEmployment has an importance of zero, and might not be used in any of the MARS functions.
+#The GCV plot shows that, Recommend to a friend is very important both in the reduction of GCV and the reduction in rss. 
+#The feature importance plots will not show the interactions/hinge-functions between variables but only the prediction error effect. 
+# Construct partial dependence plots
+p1 <- partial(cv_mars, pred.var = "ratingRecommendToFriend_NEGATIVE", grid.resolution = 10) %>% 
+  autoplot()
+p2 <- partial(cv_mars, pred.var = "ratingSeniorLeadership", grid.resolution = 10) %>% 
+  autoplot()
+p3 <- partial(cv_mars, pred.var = c("ratingRecommendToFriend_NEGATIVE", "ratingSeniorLeadership"), 
+              grid.resolution = 10) %>% 
+  plotPartial(levelplot = FALSE, zlab = "yhat", drape = TRUE, colorkey = TRUE, 
+              screen = list(z = -20, x = -60))
+
+# Display plots side by side
+gridExtra::grid.arrange(p1, p2, p3, ncol = 3)
 
 # confusion matrix + KAPPA 
 real.pred <- baked_train$job_satisfaction 
@@ -180,10 +213,10 @@ marsmodel.class.pred <- predict(cv_mars,
 
 marsmodel.scoring <- predict(cv_mars, 
                              baked_train, 
-                             type = "prob")[, "Satisfied"]
+                             type = "prob")[, "1"]
 
 marsmodel.conf <- confusionMatrix(marsmodel.class.pred, real.pred,
-                                  positive = "Satisfied", 
+                                  positive = "1", 
                                   mode = "prec_recall")
 
 # ROC and AUC
@@ -202,6 +235,7 @@ modelComparison = rbind(modelComparison,
 
 
 # bagging ----------------------------------------------------------------------------------------------------------------------
+#The bagging model are combining 100 trees. It might alright or too few trees to bag to see where the error levels off. 
 bag_model <- train(
   job_satisfaction ~ .,
   data = baked_train,
@@ -214,8 +248,30 @@ bag_model
 
 # View results
 bag_model$results
-#parameter  Accuracy     Kappa AccuracySD   KappaSD
-#1    none 0.9417062 0.8833684 0.00722381 0.0144619
+#parameter  Accuracy     Kappa AccuracySD    KappaSD
+#1      none 0.9577544 0.9155159 0.00576135 0.01152046
+
+#feature importance
+vip::vip(bag_model, num_features = 20)
+#for the bagging model it is senior leadership and culture and values that are the most important predictors. 
+
+# PDPs
+# Construct partial dependence plots
+p1 <- pdp::partial(
+  bag_model, 
+  pred.var = "ratingSeniorLeadership",
+  grid.resolution = 20
+) %>% 
+  autoplot()
+
+p2 <- pdp::partial(
+  bag_model, 
+  pred.var = "ratingCultureAndValues", 
+  grid.resolution = 20
+) %>% 
+  autoplot()
+
+gridExtra::grid.arrange(p1, p2, nrow = 1)
 
 # confusion matrix + KAPPA 
 real.pred <- baked_train$job_satisfaction 
@@ -225,13 +281,16 @@ bag_model.class.pred <- predict(bag_model,
 
 bag_model.scoring <- predict(bag_model, 
                              baked_train, 
-                             type = "prob")[,"Satisfied"]
+                             type = "prob")[,"1"]
 
 bag_model.conf <- confusionMatrix(bag_model.class.pred, real.pred,
-                                  positive = "Satisfied", 
+                                  positive = "1", 
                                   mode = "prec_recall")
 
 bag_model.conf
+#We might have overfitted the training data when we can get an accuracy of 99%. The bagging model does not penalize very complex tress, and it looks like the model
+#has come up with very specific and complex to almost capture all the 1's and 0's.
+
 # ROC and AUC
 bag.auc = colAUC(bag_model.scoring, real.pred, plotROC = TRUE) 
 
@@ -247,20 +306,28 @@ modelComparison = rbind(modelComparison,
 # random forest -----------------------------------------------------------------------------
 library(ranger)   # a c++ implementation of random forest 
 library(h2o)      # a java-based implementation of random forest
+
 #create tunegrid with 15 values from 1:15 for mtry to tunning model. 
 #Our train function will change number of entry variable at each split according to tunegrid. 
-
-tunegrid <- expand.grid(.mtry = (1:15))
+tunegrid <- expand.grid(.mtry = (1:6), min.node.size = c(1, 3, 5, 10))
 train.param <- trainControl(method = "cv", number = 5)
 
 rf.model <- train(job_satisfaction ~ ., baked_train,
                   method = "rf", 
-                  ntree = 1000,
+                  ntree = 200,
                   metric = "Accuracy",
                   trControl = train.param,
                   tune.grid = tunegrid)
 
 rf.model
+
+#Feature importance:
+p1 <- vip::vip(rf.model, num_features = 25, bar = FALSE)
+p2 <- vip::vip(rf.model, num_features = 25, bar = FALSE)
+
+gridExtra::grid.arrange(p1, p2, nrow = 1)
+#I guess the importance when talking about decision trees relates to the factor of impurity. A lower impurity factor for variables indicates how good the
+#variable can split up the data into 1's and 0's. If a leaf only contains 1's and no zeros the impurity level will be equal to 0.
 
 # confusion matrix + KAPPA 
 real.pred <- baked_train$job_satisfaction 
@@ -270,10 +337,10 @@ rfmodel.class.pred <- predict(rf.model,
 
 rfmodel.scoring <- predict(rf.model, 
                            baked_train, 
-                           type = "prob")[,"Satisfied"]
+                           type = "prob")[,"1"]
 
 rfmodel.conf <- confusionMatrix(rfmodel.class.pred, real.pred,
-                                positive = "Satisfied", 
+                                positive = "1", 
                                 mode = "prec_recall")
 
 # ROC and AUC
@@ -290,62 +357,79 @@ modelComparison = rbind(modelComparison,
                                    specificity = rfmodel.conf[[4]][[2]], 
                                    auc = rf.auc))
 # Gradient boosting --------------------------------------------------------------------------------------------------------------------------
-library(gbm) 
+library(caret) 
+
 set.seed(123)  # for reproducibility
-ames_gbm1 <- gbm(
-  formula = job_satisfaction ~ .,
-  data = baked_train,
-  distribution = "bernoulli",  # SSE loss function
-  n.trees = 500,
-  shrinkage = 0.1,
-  interaction.depth = 3,
-  n.minobsinnode = 10,
-  cv.folds = 5
-)
+fitControl <- trainControl(## 10-fold CV
+  method = "repeatedcv",
+  number = 5,
+  ## repeated ten times
+  repeats = 1)
+#The total number of trees in a sequence is set to 1000. It can set to much higher but  the GBM can overfit,
+#but it is to costly for the computer. The tree fixes the last trees errors. A optimal number must be found so it does not overfit or underfit.
+#The learning rate is set to 0.1 so it does not learn slowly but nor really quick. The depth of the trees are set to 3 which can be efficient, but there is a
+#trade off, where it captures too much of the data to not be able to generalize, but catches too little of the complex data set.
+#The minimum observation of each node is 10. Also controls the complexity.
 
-# find index for number trees with minimum CV error
-best <- which.min(ames_gbm1$cv.error)
+gbmGrid <-  expand.grid(interaction.depth = c(3), 
+                        n.trees = 1000, 
+                        shrinkage = 0.1,
+                        n.minobsinnode = 10)
 
-# get MSE and compute RMSE
-sqrt(ames_gbm1$cv.error[best])
-## [1] 23240.38
+set.seed(825)
+model_gbm <- train(job_satisfaction ~ ., data = baked_train, 
+                 method = "gbm", 
+                 trControl = fitControl, 
+                 verbose = FALSE, 
+                 ## Now specify the exact models 
+                 ## to evaluate:
+                 tuneGrid = gbmGrid)
+# View results
+model_gbm$bestTune
+#n.trees interaction.depth shrinkage n.minobsinnode
+# 1500                 9       0.1             20
+ggplot(model_gbm)
 
 # confusion matrix + KAPPA 
 real.pred <- baked_train$job_satisfaction
-xgb.class.pred <- predict(model.xgboost, 
+gbm.class.pred <- predict(model_gbm, 
                           baked_train, 
                           type = "raw") 
-xgb.scoring <- predict(model.xgboost, 
+xgb.scoring <- predict(model_gbm, 
                        baked_train, 
-                       type = "prob")[, "Satisfied"] 
-xgb.conf <- confusionMatrix(data = xgb.class.pred, 
+                       type = "prob")[, "1"] 
+xgb.conf <- confusionMatrix(data = gbm.class.pred, 
                             reference = real.pred, 
-                            positive = "Satisfied", 
+                            positive = "1", 
                             mode = "prec_recall") 
 
 # ROC and AUC
-xgb.auc = colAUC(xgb.scoring, real.pred, plotROC = TRUE) 
+gbm.auc = colAUC(gbm.scoring, real.pred, plotROC = TRUE) 
 
 #Save results
 modelComparison = rbind(modelComparison, 
                         data.frame(model = 'xgb tree', 
-                                   accuracy = xgb.conf[[3]][[1]], 
-                                   kappa = xgb.conf[[3]][[2]], 
-                                   precision = xgb.conf[[4]][[5]], 
-                                   recall_sensitivity = xgb.conf[[4]][[6]], 
-                                   specificity = xgb.conf[[4]][[2]], 
-                                   auc = xgb.auc))
+                                   accuracy = gbm.conf[[3]][[1]], 
+                                   kappa = gbm.conf[[3]][[2]], 
+                                   precision = gbm.conf[[4]][[5]], 
+                                   recall_sensitivity = gbm.conf[[4]][[6]], 
+                                   specificity = gbm.conf[[4]][[2]], 
+                                   auc = gbm.auc))
 
 
 # xgboost -------------------------------------------------------------------------------------------------------------------------------------
 #The hyperparamters are:
-#Tree-depth: That controls the depth of the tree. Smaller trees are computed faster. Higher trees can capture unique interactions. (min3, max6)
-#alpha/LR: Controls how quicly the tree proceeds and learns. Smaller vales makes the model robust, but can be stuck at a global minimum. More robust to overfitting.
-#Training on a 0.5 subsample of the rows of the data set = lower tree correlation, higher accuracy.
-# 0.1 subsample on the columns. 
+
+#The depth of each trees is set between 3 and 6 to reduce the complexity of each tree. 
 #Gamma is a regularization strategy to reduce complexity. It specifies a minimum loss reduction required to make another node/leaf. XGBoost will grow the tree to the max
 #and then pruning the tree and remove splits that do not meet the gamma.
+#alpha/LR: Controls how quickly the tree proceeds and learns. Smaller values make the model robust, but can be stuck at a global minimum. More robust to overfitting.
+#Only eta/alpha is specified which means it is a L1 regularization which wil minimize the weights of the features.
+#Training on a 0.5 subsample of the rows of the data set = lower tree correlation, higher accuracy.
+# 0.1 subsample on the columns. 
 #N_rounds = number of trees
+
+train.param <- trainControl(method = "cv", number = 5)
 model.xgboost <- train(job_satisfaction ~ ., baked_train,
                        method = "xgbTree",
                        metric = "Kappa",
@@ -357,9 +441,19 @@ model.xgboost <- train(job_satisfaction ~ ., baked_train,
                                               colsample_bytree=0.1, 
                                               min_child_weight = 1),
                        trControl = train.param)
+
 model.xgboost
 
+# View results
+model.xgboost$bestTune
+#nrounds max_depth eta gamma colsample_bytree min_child_weight subsample
+#64 300      3     0.2     3              0.1                1       0.5
 
+#Feature importance:
+p1 <- vip::vip(model.xgboost, num_features = 25, bar = FALSE)
+p2 <- vip::vip(model.xgboost, num_features = 25, bar = FALSE)
+
+gridExtra::grid.arrange(p1, p2, nrow = 1)
 
 # confusion matrix + KAPPA 
 real.pred <- baked_train$job_satisfaction
@@ -395,72 +489,28 @@ set.seed(123)
 # Randomly select 15% of the rows from the data
 data_employee_small <- data_employee[sample(nrow(data_employee), nrow(data_employee) * 0.15), ]
 
-split_small <- initial_split(data_employee_small, prop = 0.7, strata = "job_satisfaction") 
-
-employee_train_small <- training(split_small)
-employee_test_small <- testing(split_small)
-
-library(ROSE)
-employee_train_small <- ovun.sample(job_satisfaction~., data=employee_train_small, 
-                                    p=0.5, seed=2, 
-                                    method="over")$data
-
-prop.table(table(employee_train_small$job_satisfaction)) # more balanced after oversampling
-prop.table(table(employee_test_small$Satisfied))
-
-library(recipes)
-employee_recipe_small <- recipe(job_satisfaction ~ ., data = employee_train_small) %>%
-  #step_impute_knn(all_predictors(), neighbors = 6) %>%
-  step_center(all_numeric_predictors()) %>%
-  step_scale(all_numeric_predictors(), -all_outcomes()) %>%
-  step_dummy(all_nominal_predictors(), one_hot = F) %>%
-  step_nzv(all_predictors(), -all_outcomes())
-
-prepare_small <- prep(employee_recipe_small, training = employee_train_small)
-prepare_small$steps
-
-baked_train_small <- bake(prepare_small, new_data = employee_train_small)
-baked_test_small <- bake(prepare_small, new_data = employee_test_small)
-
 train.param <-  trainControl(method = "cv", number = 5, classProbs = TRUE, summaryFunction = twoClassSummary)
 
 # Tune an SVM with radial basis kernel 
 set.seed(1854)  
 employee_svm <- train(
   job_satisfaction ~ ., 
-  data = baked_train_small,
-  method = "svmRadial",               
-  trControl = trainControl(method = "cv", number = 5),
-  tuneLength = 10
+  data = baked_train,
+  method = "svmRadial",
+  trControl = ctrl,
+  tuneLength = 5
 )
-# Plot results
-ggplot(employee_svm) + theme_light()
+employee_svm$results
+ggplot(employee_svm)
+confusionMatrix(employee_svm)
 
 # Print results
 employee_svm$results 
-# notice the default is accuracy
-
-# RE-run with trContol to get the class probabilities for AUC/ROC     
-ctrl <- trainControl(
-  method = "cv", 
-  number = 10, 
-  classProbs = TRUE,             
-  summaryFunction = twoClassSummary  # also needed for AUC/ROC
-)
-
-# Tune an SVM
-set.seed(5628)  
-employee_svm_auc <- train(
-  job_satisfaction ~ ., 
-  data = baked_train_small,
-  method = "svmRadial",               
-  metric = "ROC",  # explicitly set area under ROC curve as criteria        
-  trControl = ctrl,
-  tuneLength = 10
-)
-
-confusionMatrix(employee_svm_auc)
-# interpret
+#sigma    C  Accuracy     Kappa AccuracySD    KappaSD
+#1 0.05698483 0.25 0.8761052 0.7521935 0.00743444 0.01487482
+#the model yields a low sigma and a low budget function (C). this implies that the model uses a larger margin. It becomes relatively flexible and potentially misclassify more.
+#the sigma is the decision boundary for the predictions. The sigma is quite low resulting in decision boundaries which is smoother and considers observations that is far away.
+#It seems like the prediction are easier to detect due to a low C and a low sigma value.
 
 # Feature importance 
 # Create a wrapper to retain the predicted class probabilities for the class of interest (in this case, Yes)
@@ -469,34 +519,40 @@ library(kernlab)  # also for fitting SVMs
 # Model interpretability packages
 library(pdp)      # for partial dependence plots, etc.
 library(vip)      # for variable importance plots
+library(modeldata) # for data set Job attrition
+baked_train$job_satisfaction <- as.factor(baked_train$job_satisfaction)
+baked_test$job_satisfaction <- as.factor(baked_test$job_satisfaction)
+levels(baked_train$job_satisfaction) <- c("Yes", "No") 
+levels(baked_test$job_satisfaction) <- c("Yes", "No") 
+
 
 prob_satisfied <- function(object, newdata) {
-  predict(object, newdata = newdata, type = "prob")[, "Satisfied"]
+  predict(object, newdata = newdata, type = "prob")[, "Yes"]
 }
 
 #variable importance plot
 set.seed(2827)  # for reproducibility
-vip::vip(employee_svm_auc, method = "permute", event_level = "second", nsim = 5, train = baked_train_small, 
-    target = "job_satisfaction", metric = "roc_auc", reference_class = "Satisfied", 
+vip::vip(employee_svm, method = "permute", event_level = "first", nsim = 5, train = baked_train, 
+    target = "job_satisfaction", metric = "roc_auc", reference_class = "Yes", 
     pred_wrapper = prob_satisfied)
 
 #construct PDP (feature effect plots are on the probability scale)
-features <- c("OverTime", "WorkLifeBalance", 
-              "JobSatisfaction", "JobRole")
+features <- c("ratingCareerOpportunities", "ratingCultureAndValues", 
+              "ratingSeniorLeadership", "ratingRecommendToFriend_NEGATIVE")
 pdps <- lapply(features, function(x) {
-  partial(churn_svm_auc, pred.var = x, which.class = 2,        # since the predicted probabilities from our model come in two columns (No and Yes), we specify which.class = 2 so that our interpretation is in reference to predicting Yes
+  partial(employee_svm, pred.var = x, which.class = 1,        # since the predicted probabilities from our model come in two columns (No and Yes), we specify which.class = 2 so that our interpretation is in reference to predicting Yes
           prob = TRUE, plot = TRUE, plot.engine = "ggplot2") +
     coord_flip()
 })
-grid.arrange(grobs = pdps,  ncol = 2)
+gridExtra::grid.arrange(grobs = pdps,  ncol = 2)
 # interpret
 
 # confusion matrix + KAPPA 
-real.pred <- baked_train_small$job_satisfaction #
-svm.class.pred <- predict(svm_rad, baked_train_small, type = "raw") 
-svm.scoring <- predict(svm_rad, baked_train_small, type = "prob") [, "Satisfied"] 
+real.pred <- baked_train$job_satisfaction #
+svm.class.pred <- predict(employee_svm, baked_train, type = "raw") 
+svm.scoring <- predict(employee_svm, baked_train, type = "prob") [, "Yes"] 
 
-svm.conf <- confusionMatrix(data = svm.class.pred, reference = real.pred, positive = "Satisfied", mode = "prec_recall") 
+svm.conf <- confusionMatrix(data = svm.class.pred, reference = real.pred, positive = "Yes", mode = "prec_recall") 
 
 # ROC and AUC
 svm.auc = colAUC(svm.scoring, real.pred, plotROC = TRUE) 
@@ -510,29 +566,29 @@ modelComparison
 # ROC plot based on caTools library; AUC is displayed in the console
 library(caTools)
 par(mfrow=c(1,1))
-satisfaction_prob <- predict(employee_svm_auc, baked_test_small, type = "prob")$job_satisfaction
+satisfaction_prob <- predict(employee_svm, baked_test, type = "prob")$job_satisfaction
 colAUC(satisfaction_prob, baked_test_small$job_satisfaction, plotROC = TRUE)
 
 #Question d: ####
 library(ROCR)
-knn_prob <- predict(cv_model_knn, baked_test, type = "prob")$Below  # predicted prob.
-perf_knn <- prediction(knn_prob, baked_test$PriceDummy) 
-roc_ROCR_model_knn <-  performance(perf_knn, measure = "tpr", x.measure = "fpr")
-plot(roc_ROCR_model_knn , col = "red", lty = 2, main = "ROC curve Model knn")
+prob <- predict(employee_svm, baked_test, type = "prob")$Yes  # predicted prob.
+perf <- prediction(prob, baked_test$job_satisfaction) 
+roc_ROCR <- performance(perf, measure = "tpr", x.measure = "fpr")
+plot(roc_ROCR, col = "red", lty = 2, main = "ROC curve")
 abline(a = 0, b = 1)
 
 #When we are looking at the ROC-curve it is simply the best to reach the left top corner where we predict all true positive. The important thing
 #is to find a trade off between true positive rate and the false positive rate. As mentioned, if it very important that we predict all
 #above classes correclty 
-knn_prob <- predict(cv_model_knn, baked_test, type = "prob")$Above
-probabilities = as.data.frame(knn_prob)
+prob <- predict(employee_svm, baked_test, type = "prob")$No
+probabilities = as.data.frame(prob)
 
 # create empty accuracy table
 accT = c()
 # compute accuracy per cutoff
 for (cut in seq (0, 1, 0.1)) {
-  cm <- confusionMatrix(factor(ifelse(probabilities  > cut,"Above", "Below")), 
-                        factor(baked_test$PriceDummy))
+  cm <- confusionMatrix(factor(ifelse(probabilities  > cut,"No", "Yes")), 
+                        factor(baked_test$job_satisfaction))
   accT = c(accT, cm$overall[1])}
 
 # plot 
