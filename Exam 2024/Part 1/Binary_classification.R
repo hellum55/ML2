@@ -241,9 +241,10 @@ bag_model <- train(
   data = baked_train,
   method = "treebag",
   trControl = trainControl(method = "cv", number = 5), # 5-fold CV increases the convergence time
-  nbagg = 100,  
+  nbagg = 10,  
   control = rpart.control(minsplit = 2, cp = 0)
 )
+
 bag_model
 
 # View results
@@ -652,3 +653,10 @@ gridExtra::grid.arrange(p1, p2, nrow = 1)
 #RF and bagging consists of hundreds of trees and the way the variable importance are generated are with adding the amount a given predictor has decreased
 #the gini index on the splits over all the different deep trees. The largest mean decrease in gini index for this data set
 #is wheter you can recommend the job to a friend are the rating an employee gave the culture.
+
+remove.packages("h2o")
+install.packages("h2o")
+
+library(h2o)
+h2o.init()
+
