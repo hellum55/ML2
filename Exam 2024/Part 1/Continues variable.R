@@ -2,9 +2,11 @@ library(readxl)
 # Read the Excel file with specified column types
 data_employee <- read_xls('Data.xls', 
                           na = c("", " ", "NA", "N/A", ".", "NaN", "MISSING"))
-str(data_employee)
-head(data_employee)
-glimpse(data_employee)
+
+#Lets remove some of the variables we are sure are not giving anything to the analysis. For example ID variables and timestamps:
+library(dplyr)
+data_employee <- data_employee %>%
+  select(-c(jobEndingYear, jobTitle.text, location.name, reviewId, reviewDateTime))
 
 #Lets check for missing variables for a start
 library(visdat)
@@ -17,10 +19,9 @@ plot_missing(data_employee)
 #44.05 and 43.83% respectively. The plot_missing function suggests that it is bad and we should remove them.
 #Lets see later if that is necessary. 
 
-#Lets remove some of the variables we are sure are not giving anything to the analysis. For example ID variables and timestamps:
-library(dplyr)
-data_employee <- data_employee %>%
-  select(-c(reviewId, reviewDateTime))
+#In case of transforming a variable into binary.Lets convert the isCurrentJob variable into 1 and 0
+data_employee$isCurrentJob <- ifelse(is.na(data_employee$isCurrentJob), 0, data_employee$isCurrentJob)
+#data_employee$isCurrentJob <-ifelse(data_employee$isCurrentJob == "1",1,0)
 
 # I select the columns i want to convert to factors
 str(data_employee)
@@ -38,14 +39,11 @@ data_employee$employmentStatus <- factor(data_employee$employmentStatus)
 #data_employee$jobEndingYear <- factor(data_employee$jobEndingYear)
 str(data_employee)
 
+#Delete all the NA's in the dataframe
+data_employee <- na.omit(data_employee)
+
 #The overall task to do is to predict the overall rating of the company using the variables that are necessary. It is a large data set so it
 #is important to pay attention to the feature engineering steps, so we have the best data to analyse on.
-
-#Lets look at the data:
-summary(data_employee)
-#When looking at the data we can see that IsCurrentJob only has the observation of 1. We might delete this one. 
-data_employee <- data_employee %>%
-  select(-c(jobEndingYear, jobTitle.text, location.name))
 
 #Lets look at the target variable and its distribution
 par(mfrow=c(1,4))
@@ -107,9 +105,6 @@ plot_bar(data_employee)
 #There is no need to look at JobTitle and LocationName
 #Overall it looks fine. Continue!
 
-
-########## We might need to do this #########
-
 ############################################ BUILDING THE MODELS ###########################################################
 #Create the recipe
 library(rsample)
@@ -158,14 +153,17 @@ cv_mars <- train(
 )
 
 # View results
+summary(cv_mars) %>% .$coefficients %>% head(10)
+#The summary shows that ratingCultureValue are including in the model with a knot at -1.096 with a coefficient
+#of 0.53. Also rating career oppotunities is including with a knot at -1.22 and a coef of -0.45.
 cv_mars$bestTune
 ##    nprune degree
 ## 13     23      2
-
+#The best tune has 23 terms and two degrees of freedom, so there are interactions between the variables.
 cv_mars$results %>%
   filter(nprune == cv_mars$bestTune$nprune, degree == cv_mars$bestTune$degree)
-#degree nprune  Accuracy     Kappa  AccuracySD     KappaSD
-#    2     23 0.5699675 0.3995818 0.004975854 0.007533007
+#degree nprune     RMSE Rsquared      MAE     RMSESD RsquaredSD     MAESD
+#1    2     23 0.632176 0.736995 0.464577 0.01169832 0.01533321 0.0104761
 ggplot(cv_mars)
 
 ############################################### DECISION TREES ##########################################################
@@ -182,7 +180,6 @@ tree.model <- train(ratingOverall ~., baked_train,
                     method = "rpart",
                     trControl = train.param,
                     tuneLength = 20) 
-tree.model
 
 #Lets have a look on the feature importance:
 vip(tree.model, num_features = 14, bar = FALSE)
@@ -198,6 +195,7 @@ p3 <- partial(tree.model, pred.var = c("ratingSeniorLeadership", "ratingCareerOp
 gridExtra::grid.arrange(p1, p2, p3, ncol = 3)
 
 ############################################ BAGGING ###################################################################
+
 bag_model <- train(
   ratingOverall ~ .,
   data = baked_train,
